@@ -136,13 +136,13 @@ def test_non_vpc_functions_cannot_log_in_to_the_database(function):
             assert "rds-db:connect" not in as_list(statement["Action"])
 
 
-def test_only_the_score_function_can_write_to_dynamodb_so_far():
+def test_only_ingest_and_score_can_write_to_dynamodb_so_far():
     writers = set()
     for path in ROLE_POLICY_FILES:
         for statement in statements(path):
             if {"dynamodb:PutItem", "dynamodb:UpdateItem"} & set(as_list(statement["Action"])):
                 writers.add(path.name.split("-")[0])
-    assert writers == {"score"}
+    assert writers == {"ingest", "score"}
 
 
 def test_query_function_has_read_only_dynamodb_access():
@@ -150,3 +150,70 @@ def test_query_function_has_read_only_dynamodb_access():
     for statement in statements(POLICY_DIR / "query-data.json"):
         actions.update(a for a in as_list(statement["Action"]) if a.startswith("dynamodb:"))
     assert actions == {"dynamodb:Query", "dynamodb:GetItem"}
+
+
+# ---- Week 13 Day 3: buckets, queues and the encryption key -------------------
+
+def actions_on(function, resource_fragment):
+    """Every action the function's data policy allows on resources containing the fragment."""
+    found = set()
+    for statement in statements(POLICY_DIR / f"{function}-data.json"):
+        if any(resource_fragment in resource for resource in as_list(statement["Resource"])):
+            found.update(as_list(statement["Action"]))
+    return found
+
+
+def test_ingest_can_read_raw_but_not_write_it():
+    assert actions_on("ingest", "-raw-") == {"s3:GetObject"}
+
+
+def test_ingest_can_write_processed_and_quarantine_but_not_read_them():
+    assert actions_on("ingest", "-processed-") == {"s3:PutObject"}
+    assert actions_on("ingest", "-quarantine-") == {"s3:PutObject"}
+
+
+def test_ingest_cannot_touch_the_reports_bucket():
+    assert actions_on("ingest", "-reports-") == set()
+
+
+def test_no_role_can_delete_objects_or_list_buckets():
+    for path in ROLE_POLICY_FILES:
+        for statement in statements(path):
+            for action in as_list(statement["Action"]):
+                assert action not in {"s3:DeleteObject", "s3:ListBucket", "s3:DeleteBucket"}, path.name
+
+
+def test_only_ingest_sends_to_the_queue_and_only_score_receives():
+    assert actions_on("ingest", "transactions.fifo") == {"sqs:SendMessage"}
+    assert actions_on("score", "transactions.fifo") == {
+        "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes",
+    }
+    for function in ("query", "report"):
+        assert actions_on(function, ":sqs:") == set()
+
+
+def test_no_role_can_purge_or_delete_a_queue():
+    for path in ROLE_POLICY_FILES:
+        for statement in statements(path):
+            for action in as_list(statement["Action"]):
+                assert action not in {"sqs:PurgeQueue", "sqs:DeleteQueue"}, path.name
+
+
+def test_kms_use_is_limited_to_the_project_key():
+    for path in sorted(POLICY_DIR.glob("*-data.json")):
+        for statement in statements(path):
+            if any(action.startswith("kms:") for action in as_list(statement["Action"])):
+                assert statement["Resource"] == "__KMS_KEY_ARN__", path.name
+
+
+def test_score_can_decrypt_but_not_create_data_keys():
+    assert actions_on("score", "__KMS_KEY_ARN__") == {"kms:Decrypt"}
+
+
+def test_no_role_can_manage_the_key():
+    allowed = {"kms:Decrypt", "kms:GenerateDataKey"}
+    for path in ROLE_POLICY_FILES:
+        for statement in statements(path):
+            for action in as_list(statement["Action"]):
+                if action.startswith("kms:"):
+                    assert action in allowed, f"{path.name}: {action}"

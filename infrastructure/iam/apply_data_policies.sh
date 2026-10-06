@@ -20,6 +20,10 @@ DBI_RESOURCE_ID="$(aws rds describe-db-instances --db-instance-identifier "$DB_I
     --query 'DBInstances[0].DbiResourceId' --output text 2>/dev/null || true)"
 export DBI_RESOURCE_ID
 
+# The project encryption key, by its full ARN (an alias cannot be used in an IAM policy).
+KMS_KEY_ARN="$(kms_key_arn)"
+export KMS_KEY_ARN
+
 for FN in $FUNCTIONS; do
   TEMPLATE="$POLICIES/${FN}-data.json"
   [[ -f "$TEMPLATE" ]] || continue
@@ -27,7 +31,7 @@ for FN in $FUNCTIONS; do
   if grep -q "__[A-Z_]*__" "$RENDERED/${FN}-data.json"; then
     echo "ERROR: ${FN}-data.json still has an unfilled value:" >&2
     grep -o "__[A-Z_]*__" "$RENDERED/${FN}-data.json" | sort -u >&2
-    echo "Has the database been created? Run ./infrastructure/rds/deploy_rds.sh first." >&2
+    echo "The database (deploy_rds.sh) and the KMS key (deploy_key.sh) must exist first." >&2
     exit 1
   fi
   aws iam put-role-policy --role-name "${PREFIX}-${FN}-role" \
