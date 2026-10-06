@@ -27,8 +27,8 @@ It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is 
 | Week 13 Day 1 | Design Kickoff and Infrastructure Setup | Done |
 | Week 13 Day 2 | Data Layer | Done |
 | Week 13 Day 3 | Security and Storage | Done |
-| Week 13 Day 4 | ETL Lambda | Next |
-| Week 13 Day 5 | API Backend Part 1 | |
+| Week 13 Day 4 | ETL Lambda | Done |
+| Week 13 Day 5 | API Backend Part 1 | Next |
 | Week 14 Day 1 | Write API and Alert System | |
 | Week 14 Day 2 | CloudWatch Monitoring and Observability | |
 | Week 14 Day 3 | Automated Testing | |
@@ -48,6 +48,7 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 | [Data management design](docs/data-governance.md) | POPIA, data quality, retention, migration, risk register |
 | [ERD](docs/erd.md) | Database tables and relationships |
 | [SQL](sql/) | `schema.sql`, `db_users.sql`, `seed.sql` |
+| [Logs Insights queries](docs/logs-insights-queries.md) | Ready-made queries for the structured logs |
 | [Build log](docs/build-log.md) | What was built in each phase, with test results |
 
 ## Repository layout
@@ -152,6 +153,32 @@ python scripts/verify_storage.py               # prove every control is really i
 ```
 
 The last command checks the live account and finishes with a line such as `43 of 43 checks passed`.
+
+### Step 4: the ingest (ETL) Lambda (Week 13 Day 4)
+
+The database does not need to be running for this step.
+
+```bash
+./infrastructure/dynamodb/deploy_table.sh         # raise write capacity (still inside the Free Tier)
+./infrastructure/lambda/deploy_function.sh ingest # package, deploy, wire the S3 trigger and dead-letter queue
+python scripts/verify_ingest.py                   # upload a sample file and check what the pipeline did
+```
+
+To try it yourself, upload a file and watch the logs:
+
+```bash
+aws s3 cp data/sample_transactions_valid.csv s3://fintrust-capstone-raw-$(aws sts get-caller-identity --query Account --output text)/uploads/demo/valid.csv
+aws logs tail /aws/lambda/fintrust-capstone-ingest --since 5m
+```
+
+## Sample data
+
+| File | Contents |
+|---|---|
+| `data/sample_transactions_valid.csv` | 15 valid transactions across 9 accounts |
+| `data/sample_transactions_mixed.csv` | 11 rows: 4 valid and 7 with deliberate errors, one per validation rule |
+
+CSV columns: `transaction_id, account_id, tx_date, amount, currency, tx_type, channel, merchant_name, country_code, description`. `currency`, `merchant_name` and `description` are optional.
 
 ## Branching and commits
 
