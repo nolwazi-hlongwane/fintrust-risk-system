@@ -28,8 +28,8 @@ It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is 
 | Week 13 Day 2 | Data Layer | Done |
 | Week 13 Day 3 | Security and Storage | Done |
 | Week 13 Day 4 | ETL Lambda | Done |
-| Week 13 Day 5 | API Backend Part 1 | Next |
-| Week 14 Day 1 | Write API and Alert System | |
+| Week 13 Day 5 | API Backend Part 1 | Done |
+| Week 14 Day 1 | Write API and Alert System | Next |
 | Week 14 Day 2 | CloudWatch Monitoring and Observability | |
 | Week 14 Day 3 | Automated Testing | |
 | Week 14 Day 4 | SQL Analytics and Reporting Layer | |
@@ -169,6 +169,28 @@ To try it yourself, upload a file and watch the logs:
 ```bash
 aws s3 cp data/sample_transactions_valid.csv s3://fintrust-capstone-raw-$(aws sts get-caller-identity --query Account --output text)/uploads/demo/valid.csv
 aws logs tail /aws/lambda/fintrust-capstone-ingest --since 5m
+```
+
+### Step 5: scoring Lambda and the read API (Week 13 Day 5)
+
+The database must be running for this step: `./scripts/rds_start.sh`.
+
+Open the tunnel in a second terminal window (`./scripts/db_tunnel.sh`), then:
+
+```bash
+python scripts/run_sql.py sql/db_users.sql               # refresh database permissions
+./infrastructure/lambda/deploy_function.sh score         # scoring Lambda, connected to the queue
+./infrastructure/lambda/deploy_function.sh query         # API Lambda
+./infrastructure/apigateway/deploy_api.sh                # REST API, usage plan and API key
+python scripts/verify_scoring_api.py                     # upload a file and check everything through the API
+```
+
+To call the API yourself:
+
+```bash
+source ./scripts/api_env.sh
+curl -s -H "x-api-key: $API_KEY" "$API_URL/transactions?account_id=ACC-1007&risk_level=HIGH" | python3 -m json.tool
+curl -s -H "x-api-key: $API_KEY" "$API_URL/insights" | python3 -m json.tool
 ```
 
 ## Sample data

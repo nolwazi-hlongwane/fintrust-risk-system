@@ -1,7 +1,7 @@
 # API Design
 
-**Brief slot:** Week 13 Day 1: Design Kickoff (specification). Read routes are built in Week 13 Day 5, write routes in Week 14 Day 1.
-**Status:** draft specification. Response examples are replaced with real output once deployed.
+**Brief slot:** Week 13 Day 1: Design Kickoff (specification). Read routes built in Week 13 Day 5; `/alerts` and the write routes in Week 14 Day 1.
+**Status:** `/health`, `/transactions`, `/transactions/{transaction_id}/journey` and `/insights` are deployed. The machine-readable definition is `infrastructure/apigateway/openapi.json` (OpenAPI 3), which is what API Gateway is built from.
 
 ## Overview
 
@@ -49,9 +49,10 @@ Returns `503` with `"database": "unavailable"` if RDS cannot be reached (for exa
 
 | Query parameter | Required | Rule |
 |---|---|---|
-| `account_id` | no | Exact match |
+| `account_id` | no | Exact match, e.g. `ACC-1007` |
+| `transaction_id` | no | Exact match |
 | `risk_level` | no | `LOW`, `MEDIUM` or `HIGH` |
-| `from`, `to` | no | Dates, `YYYY-MM-DD`, inclusive |
+| `from`, `to` | no | Dates, `YYYY-MM-DD`, inclusive, as South African calendar days |
 | `limit` | no | 1 to 100, default 25 |
 | `offset` | no | 0 or more, default 0 |
 
@@ -85,6 +86,7 @@ Read from the DynamoDB event store.
 {
   "transaction_id": "TXN-20260915-000123",
   "account_id": "ACC-1007",
+  "status": "SCORED",
   "score": {
     "risk_score": 70,
     "risk_level": "HIGH",
@@ -102,6 +104,8 @@ Read from the DynamoDB event store.
   ]
 }
 ```
+
+`status` is one of `RECEIVED`, `QUEUED`, `RETRYING` (scoring has failed once or twice and SQS will try again), `DEAD_LETTERED` (three failures; the message is waiting in the dead-letter queue), `SCORED` or `ALERTED`. A transaction that failed scoring has `"score": null` and one `SCORE_FAILED` event per attempt, each with a plain-language reason.
 
 `404` if the transaction id is unknown.
 
