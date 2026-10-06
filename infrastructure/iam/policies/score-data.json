@@ -4,14 +4,37 @@
     {
       "Sid": "DatabaseLoginAsScoreUserOnly",
       "Effect": "Allow",
-      "Action": ["rds-db:connect"],
+      "Action": [
+        "rds-db:connect"
+      ],
       "Resource": "arn:aws:rds-db:__REGION__:__ACCOUNT_ID__:dbuser:__DBI_RESOURCE_ID__/fintrust_score"
     },
     {
       "Sid": "WriteScoresAndEvents",
       "Effect": "Allow",
-      "Action": ["dynamodb:PutItem", "dynamodb:UpdateItem"],
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem"
+      ],
       "Resource": "arn:aws:dynamodb:__REGION__:__ACCOUNT_ID__:table/__PREFIX__-events"
+    },
+    {
+      "Sid": "ReceiveTransactionsFromQueue",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": "arn:aws:sqs:__REGION__:__ACCOUNT_ID__:__PREFIX__-transactions.fifo"
+    },
+    {
+      "Sid": "DecryptQueueMessages",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt"
+      ],
+      "Resource": "__KMS_KEY_ARN__"
     }
   ]
 }

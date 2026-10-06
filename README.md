@@ -26,8 +26,8 @@ It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is 
 |---|---|---|
 | Week 13 Day 1 | Design Kickoff and Infrastructure Setup | Done |
 | Week 13 Day 2 | Data Layer | Done |
-| Week 13 Day 3 | Security and Storage | Next |
-| Week 13 Day 4 | ETL Lambda | |
+| Week 13 Day 3 | Security and Storage | Done |
+| Week 13 Day 4 | ETL Lambda | Next |
 | Week 13 Day 5 | API Backend Part 1 | |
 | Week 14 Day 1 | Write API and Alert System | |
 | Week 14 Day 2 | CloudWatch Monitoring and Observability | |
@@ -138,6 +138,20 @@ When you finish for the day, stop the database so it does not use credits:
 ```bash
 ./scripts/rds_stop.sh      # and ./scripts/rds_start.sh to resume
 ```
+
+### Step 3: encryption key, buckets and queues (Week 13 Day 3)
+
+The database does not need to be running for this step.
+
+```bash
+./infrastructure/kms/deploy_key.sh             # the project's encryption key
+./infrastructure/s3/deploy_buckets.sh          # four encrypted, private buckets
+./infrastructure/sqs/deploy_queues.sh          # transaction queue and dead-letter queues
+./infrastructure/iam/apply_data_policies.sh    # let each role reach only its own data
+python scripts/verify_storage.py               # prove every control is really in place
+```
+
+The last command checks the live account and finishes with a line such as `43 of 43 checks passed`.
 
 ## Branching and commits
 

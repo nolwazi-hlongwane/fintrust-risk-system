@@ -28,7 +28,8 @@ render() {
       -e "s|__REGION__|${AWS_REGION}|g" \
       -e "s|__PREFIX__|${PREFIX}|g" \
       -e "s|__ENV__|${FINTRUST_ENV}|g" \
-      -e "s|__DBI_RESOURCE_ID__|${DBI_RESOURCE_ID:-__DBI_RESOURCE_ID__}|g" "$1"
+      -e "s|__DBI_RESOURCE_ID__|${DBI_RESOURCE_ID:-__DBI_RESOURCE_ID__}|g" \
+      -e "s|__KMS_KEY_ARN__|${KMS_KEY_ARN:-__KMS_KEY_ARN__}|g" "$1"
 }
 
 # ---- names shared by several scripts ----------------------------------------
@@ -39,6 +40,27 @@ export DB_MASTER_PARAM="/fintrust-admin/${FINTRUST_ENV}/db_master_password"   # 
 export TABLE_NAME="${PREFIX}-events"
 export TUNNEL_NAME="${PREFIX}-db-tunnel"
 export TUNNEL_LOCAL_PORT="15432"
+export KEY_ALIAS="alias/${PREFIX}"
+export BUCKETS="raw processed quarantine reports"
+export QUEUE_NAME="${PREFIX}-transactions.fifo"          # ingest -> score, ordered per account
+export DLQ_NAME="${PREFIX}-transactions-dlq.fifo"        # messages that failed scoring 3 times
+export INGEST_DLQ_NAME="${PREFIX}-ingest-dlq"            # S3 events the ingest Lambda could not process
+
+bucket_name() {   # bucket_name raw  ->  fintrust-capstone-raw-<account id>
+  echo "${PREFIX}-$1-${ACCOUNT_ID}"   # the account id makes the name globally unique
+}
+
+kms_key_arn() {
+  aws kms describe-key --key-id "$KEY_ALIAS" --query KeyMetadata.Arn --output text 2>/dev/null || true
+}
+
+queue_url() {     # queue_url <queue name>; prints nothing if the queue does not exist
+  aws sqs get-queue-url --queue-name "$1" --query QueueUrl --output text 2>/dev/null || true
+}
+
+queue_arn() {     # queue_arn <queue name>
+  echo "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:$1"
+}
 
 # ---- lookups: find a resource by its Name tag; print nothing if it is absent -
 none_to_empty() { sed -e 's/^None$//'; }
@@ -74,9 +96,10 @@ db_status() {
 }
 
 put_param() {   # put_param name value
-  aws ssm put-parameter --name "/fintrust/${FINTRUST_ENV}/$1" --value "$2" \
-      --type String --overwrite >/dev/null
+  # Sent as JSON so a value that is a URL (such as a queue URL) is stored as
+  # text; older AWS CLI versions would otherwise try to download it.
+  aws ssm put-parameter --cli-input-json \
+      "{\"Name\":\"/fintrust/${FINTRUST_ENV}/$1\",\"Value\":\"$2\",\"Type\":\"String\",\"Overwrite\":true}" \
+      >/dev/null
   echo "  SSM /fintrust/${FINTRUST_ENV}/$1 = $2"
 }
-
-echo "Account ${ACCOUNT_ID} | region ${AWS_REGION} | caller ${CALLER_ARN}"

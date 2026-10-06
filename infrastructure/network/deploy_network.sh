@@ -54,6 +54,7 @@ AZ_B="$(aws ec2 describe-availability-zones --filters Name=state,Values=availabl
     --query 'sort_by(AvailabilityZones,&ZoneName)[1].ZoneName' --output text)"
 
 make_subnet() {  # make_subnet <a|b> <cidr> <az>
+  set -e   # bash turns "stop on error" off inside $(...), so switch it back on here
   local id; id="$(subnet_id "$1")"
   if [[ -z "$id" ]]; then
     id="$(aws ec2 create-subnet --vpc-id "$VPC_ID" --cidr-block "$2" --availability-zone "$3" \
@@ -96,6 +97,7 @@ done
 
 # ---------- security groups ----------
 make_sg() {  # make_sg <short-name> <description>
+  set -e   # bash turns "stop on error" off inside $(...), so switch it back on here
   local id; id="$(sg_id "$1")"
   if [[ -z "$id" ]]; then
     id="$(aws ec2 create-security-group --vpc-id "$VPC_ID" --group-name "${PREFIX}-$1-sg" \

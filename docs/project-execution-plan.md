@@ -86,7 +86,7 @@ Three consequences, each a deliberate decision:
 | **X-Ray** | Tracing enabled on the Lambdas and API stage. | 100k traces |
 | **IAM** | One least-privilege role per Lambda, no wildcard actions, one permission boundary on all five. | Free |
 | **VPC** | Two private subnets in two AZs, security groups (Lambda → RDS on 5432 only), S3 and DynamoDB gateway endpoints. No NAT. | Free |
-| **KMS** | One customer-managed key encrypting the buckets, DynamoDB and the queue. | About $1/month from credits |
+| **KMS** | One customer-managed key encrypting the four buckets and the queues. | About $1/month from credits |
 | **SSM Parameter Store** | Application configuration under `/fintrust/dev/`. | Free (standard tier) |
 | **CloudFront** | Serves the dashboard over HTTPS from a private bucket. | Free tier |
 

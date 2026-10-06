@@ -1,0 +1,57 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadUploadedFiles",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::__PREFIX__-raw-__ACCOUNT_ID__/*"
+    },
+    {
+      "Sid": "WriteCleanAndRejectedRows",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::__PREFIX__-processed-__ACCOUNT_ID__/*",
+        "arn:aws:s3:::__PREFIX__-quarantine-__ACCOUNT_ID__/*"
+      ]
+    },
+    {
+      "Sid": "SendTransactionsToQueue",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage"
+      ],
+      "Resource": "arn:aws:sqs:__REGION__:__ACCOUNT_ID__:__PREFIX__-transactions.fifo"
+    },
+    {
+      "Sid": "SendFailedInvocationsToIngestDlq",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage"
+      ],
+      "Resource": "arn:aws:sqs:__REGION__:__ACCOUNT_ID__:__PREFIX__-ingest-dlq"
+    },
+    {
+      "Sid": "WriteJourneyEvents",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem"
+      ],
+      "Resource": "arn:aws:dynamodb:__REGION__:__ACCOUNT_ID__:table/__PREFIX__-events"
+    },
+    {
+      "Sid": "UseProjectKeyForBucketsAndQueues",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "__KMS_KEY_ARN__"
+    }
+  ]
+}
