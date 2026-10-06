@@ -25,8 +25,8 @@ One row per Lambda function. "Base" permissions are deployed now; the rest are t
 | | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | W13 D3 |
 | **score** (`fintrust-capstone-score-role`) | Logs, X-Ray (as above) | Its own log group | Deployed W13 D1 |
 | | Six `ec2:` network interface actions | `*` (required for any Lambda in a VPC) | Deployed W13 D1 |
-| | `rds-db:connect` | Database user `fintrust_score` only | W13 D2 |
-| | `dynamodb:PutItem`, `dynamodb:UpdateItem` | Events table | W13 D2 |
+| | `rds-db:connect` | Database user `fintrust_score` only | Deployed W13 D2 |
+| | `dynamodb:PutItem`, `dynamodb:UpdateItem` | Events table | Deployed W13 D2 |
 | | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` | Transactions FIFO queue | W13 D3 |
 | | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | W13 D3 |
 | **alert** (`fintrust-capstone-alert-role`) | Logs, X-Ray, SSM (as ingest) | Own log group; `/fintrust/dev/*` | Deployed W13 D1 |
@@ -35,12 +35,12 @@ One row per Lambda function. "Base" permissions are deployed now; the rest are t
 | | `ses:SendEmail` | The verified sender identity only | W14 D1 |
 | | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | W14 D1 |
 | **query** (`fintrust-capstone-query-role`) | Logs, X-Ray, network interfaces (as score) | Own log group | Deployed W13 D1 |
-| | `rds-db:connect` | Database user `fintrust_query` only | W13 D2 |
-| | `dynamodb:Query`, `dynamodb:GetItem` | Events table and its index | W13 D2 |
+| | `rds-db:connect` | Database user `fintrust_query` only | Deployed W13 D2 |
+| | `dynamodb:Query`, `dynamodb:GetItem` | Events table and its index | Deployed W13 D2 |
 | | `s3:PutObject` | Raw bucket, `uploads/` prefix only | W14 D1 |
 | | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | W13 D3 |
 | **report** (`fintrust-capstone-report-role`) | Logs, X-Ray, network interfaces (as score) | Own log group | Deployed W13 D1 |
-| | `rds-db:connect` | Database user `fintrust_report` only | W13 D2 |
+| | `rds-db:connect` | Database user `fintrust_report` only | Deployed W13 D2 |
 | | `s3:PutObject` | Reports bucket objects | W14 D4 |
 | | `kms:GenerateDataKey` | The project key | W14 D4 |
 

@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DatabaseLoginAsScoreUserOnly",
+      "Effect": "Allow",
+      "Action": ["rds-db:connect"],
+      "Resource": "arn:aws:rds-db:__REGION__:__ACCOUNT_ID__:dbuser:__DBI_RESOURCE_ID__/fintrust_score"
+    },
+    {
+      "Sid": "WriteScoresAndEvents",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem", "dynamodb:UpdateItem"],
+      "Resource": "arn:aws:dynamodb:__REGION__:__ACCOUNT_ID__:table/__PREFIX__-events"
+    }
+  ]
+}

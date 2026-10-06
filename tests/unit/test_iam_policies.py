@@ -98,11 +98,55 @@ def test_non_vpc_functions_read_ssm_but_have_no_vpc_permissions(function):
     assert "VpcNetworkInterfaces" not in sids
 
 
-@pytest.mark.parametrize("function", FUNCTIONS)
-def test_every_role_action_is_inside_the_permission_boundary(function):
+ROLE_POLICY_FILES = sorted(POLICY_DIR.glob("*-base.json")) + sorted(POLICY_DIR.glob("*-data.json"))
+
+
+@pytest.mark.parametrize("path", ROLE_POLICY_FILES, ids=lambda p: p.name)
+def test_every_role_action_is_inside_the_permission_boundary(path):
     boundary_actions = set()
     for statement in statements(POLICY_DIR / "permission-boundary.json"):
         boundary_actions.update(as_list(statement["Action"]))
-    for statement in statements(POLICY_DIR / f"{function}-base.json"):
+    for statement in statements(path):
         for action in as_list(statement["Action"]):
-            assert action in boundary_actions, f"{function}: {action} is outside the boundary"
+            assert action in boundary_actions, f"{path.name}: {action} is outside the boundary"
+
+
+@pytest.mark.parametrize("path", sorted(POLICY_DIR.glob("*-data.json")), ids=lambda p: p.name)
+def test_data_policies_never_use_resource_star(path):
+    for statement in statements(path):
+        for resource in as_list(statement["Resource"]):
+            assert resource != "*"
+            assert not resource.endswith(":*"), f"{path.name}: {resource} is too broad"
+
+
+@pytest.mark.parametrize("function", ["score", "query", "report"])
+def test_each_vpc_function_can_log_in_only_as_its_own_database_user(function):
+    connect = [
+        s for s in statements(POLICY_DIR / f"{function}-data.json")
+        if "rds-db:connect" in as_list(s["Action"])
+    ]
+    assert len(connect) == 1
+    assert connect[0]["Resource"].endswith(f":dbuser:__DBI_RESOURCE_ID__/fintrust_{function}")
+
+
+@pytest.mark.parametrize("function", ["ingest", "alert"])
+def test_non_vpc_functions_cannot_log_in_to_the_database(function):
+    for path in POLICY_DIR.glob(f"{function}-*.json"):
+        for statement in statements(path):
+            assert "rds-db:connect" not in as_list(statement["Action"])
+
+
+def test_only_the_score_function_can_write_to_dynamodb_so_far():
+    writers = set()
+    for path in ROLE_POLICY_FILES:
+        for statement in statements(path):
+            if {"dynamodb:PutItem", "dynamodb:UpdateItem"} & set(as_list(statement["Action"])):
+                writers.add(path.name.split("-")[0])
+    assert writers == {"score"}
+
+
+def test_query_function_has_read_only_dynamodb_access():
+    actions = set()
+    for statement in statements(POLICY_DIR / "query-data.json"):
+        actions.update(a for a in as_list(statement["Action"]) if a.startswith("dynamodb:"))
+    assert actions == {"dynamodb:Query", "dynamodb:GetItem"}
