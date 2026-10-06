@@ -1,0 +1,20 @@
+[project]
+name = "fintrust"
+version = "0.1.0"
+description = "FinTrust Cloud-Based Transaction Insights and Risk Monitoring System"
+requires-python = ">=3.13"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+    "integration: needs moto plus a PostgreSQL container; runs in CI on the develop branch only",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]

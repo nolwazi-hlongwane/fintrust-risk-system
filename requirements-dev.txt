@@ -1,0 +1,6 @@
+# Development and test dependencies (not packaged into Lambda).
+-r requirements.txt
+pytest==9.1.1
+pytest-cov==7.1.0
+moto[all]==5.2.3
+ruff==0.16.10

@@ -1,0 +1,4 @@
+# Runtime dependencies packaged with the Lambda functions.
+# Every version is pinned so that a build today and a build next month are identical.
+boto3==1.43.108
+psycopg2-binary==2.9.13
