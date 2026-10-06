@@ -25,9 +25,9 @@ It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is 
 | Brief slot | Phase | Status |
 |---|---|---|
 | Week 13 Day 1 | Design Kickoff and Infrastructure Setup | Done |
-| Week 13 Day 2 | Data Layer | Next |
-| Week 13 Day 3 | Security and Storage | |
-| Week 13 Day 4 | ETL Lambda | |
+| Week 13 Day 2 | Data Layer | Done |
+| Week 13 Day 3 | Security and Storage | Done |
+| Week 13 Day 4 | ETL Lambda | Next |
 | Week 13 Day 5 | API Backend Part 1 | |
 | Week 14 Day 1 | Write API and Alert System | |
 | Week 14 Day 2 | CloudWatch Monitoring and Observability | |
@@ -47,6 +47,7 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 | [Security plan and IAM role matrix](docs/security-plan.md) | Who and what can access which resource |
 | [Data management design](docs/data-governance.md) | POPIA, data quality, retention, migration, risk register |
 | [ERD](docs/erd.md) | Database tables and relationships |
+| [SQL](sql/) | `schema.sql`, `db_users.sql`, `seed.sql` |
 | [Build log](docs/build-log.md) | What was built in each phase, with test results |
 
 ## Repository layout
@@ -77,6 +78,16 @@ pytest
 
 The tests use a simulated AWS, so they need no AWS account and cost nothing.
 
+The integration tests also need a PostgreSQL database. With Docker running:
+
+```bash
+docker compose up -d
+PGHOST=localhost PGPORT=5433 PGUSER=postgres PGPASSWORD=local-test-only pytest
+docker compose down
+```
+
+Without a database those tests are skipped, not failed.
+
 ## Deploy to AWS
 
 You need an AWS account, the AWS CLI configured for an **IAM user** (not the root user), and the region set to `eu-north-1`. Each step is a script that is safe to run more than once. Steps are added here as each phase is completed.
@@ -98,6 +109,49 @@ ALERT_EMAIL=you@example.com ./infrastructure/billing/create_billing_alarm.sh
 ```
 
 Then open the email from AWS Notifications and choose **Confirm subscription**.
+
+### Step 2: network, database and event store (Week 13 Day 2)
+
+```bash
+./infrastructure/network/deploy_network.sh     # private network, about 1 minute
+./infrastructure/rds/deploy_rds.sh             # PostgreSQL database, about 10 minutes
+./infrastructure/dynamodb/deploy_table.sh      # DynamoDB table
+./infrastructure/iam/apply_data_policies.sh    # let each role reach only its own data
+./infrastructure/rds/deploy_tunnel.sh          # private access for the administrator, about 5 minutes
+```
+
+The database has no public address. To load the schema, open the private tunnel in a **second** terminal window and leave it running:
+
+```bash
+./scripts/db_tunnel.sh
+```
+
+Then, back in the first window:
+
+```bash
+python scripts/run_sql.py sql/schema.sql sql/db_users.sql sql/seed.sql
+python scripts/run_sql.py -c "SELECT risk_level, count(*) FROM transactions GROUP BY 1 ORDER BY 1"
+```
+
+When you finish for the day, stop the database so it does not use credits:
+
+```bash
+./scripts/rds_stop.sh      # and ./scripts/rds_start.sh to resume
+```
+
+### Step 3: encryption key, buckets and queues (Week 13 Day 3)
+
+The database does not need to be running for this step.
+
+```bash
+./infrastructure/kms/deploy_key.sh             # the project's encryption key
+./infrastructure/s3/deploy_buckets.sh          # four encrypted, private buckets
+./infrastructure/sqs/deploy_queues.sh          # transaction queue and dead-letter queues
+./infrastructure/iam/apply_data_policies.sh    # let each role reach only its own data
+python scripts/verify_storage.py               # prove every control is really in place
+```
+
+The last command checks the live account and finishes with a line such as `43 of 43 checks passed`.
 
 ## Branching and commits
 

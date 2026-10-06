@@ -1,0 +1,20 @@
+# Local PostgreSQL for integration tests. Nothing here is used in AWS.
+#
+#   docker compose up -d
+#   PGHOST=localhost PGPORT=5433 PGUSER=postgres PGPASSWORD=local-test-only pytest tests/integration
+#   docker compose down
+#
+# The password below protects only this throwaway container on your own machine.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: local-test-only
+      POSTGRES_DB: fintrust
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

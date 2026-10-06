@@ -1,0 +1,87 @@
+name: CI
+
+# Unit tests run on every push to any branch.
+# Integration tests run on the develop branch only. They need a real PostgreSQL,
+# which GitHub starts as a throwaway service container for the job.
+
+on:
+  push:
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Check shell scripts for syntax errors
+        run: |
+          for script in $(git ls-files '*.sh'); do bash -n "$script"; done
+
+      - name: Unit tests
+        run: pytest tests/unit --cov=fintrust --cov-report=term-missing
+        env:
+          # Fake values: moto intercepts every AWS call, nothing reaches a real account.
+          AWS_ACCESS_KEY_ID: testing
+          AWS_SECRET_ACCESS_KEY: testing
+          AWS_DEFAULT_REGION: eu-north-1
+
+  integration:
+    name: Integration tests (develop only)
+    if: github.ref == 'refs/heads/develop'
+    needs: unit
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          # Protects only this throwaway container, which is deleted when the job ends.
+          POSTGRES_PASSWORD: local-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: local-test-only
+      # Fail the job if the database is missing, instead of skipping the tests.
+      REQUIRE_POSTGRES: "1"
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_DEFAULT_REGION: eu-north-1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Integration tests
+        run: pytest tests/integration -v
