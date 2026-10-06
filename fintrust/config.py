@@ -51,6 +51,8 @@ DEFAULTS = {
     "db_port": "5432",
     "db_name": "fintrust",
     "db_auth_mode": "iam",              # "iam" in AWS, "password" for local tests
+    "max_receive_count": "3",           # failed attempts before SQS dead-letters a message
+    "cors_allowed_origin": "*",         # tightened to the dashboard's address when it is deployed
 }
 
 

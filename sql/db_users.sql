@@ -41,7 +41,9 @@ GRANT USAGE ON SCHEMA public TO fintrust_score, fintrust_query, fintrust_report;
 -- score Lambda: checks the account exists, counts recent transactions for the
 -- velocity rule, then inserts the transaction, its rule events and any alert.
 -- It cannot update or delete anything: the ledger is append-only.
-GRANT SELECT ON accounts, transactions TO fintrust_score;
+-- It may read risk_events so that a message delivered a second time can be
+-- answered from what is already stored instead of being scored again.
+GRANT SELECT ON accounts, transactions, risk_events TO fintrust_score;
 GRANT INSERT ON transactions, risk_events, alerts TO fintrust_score;
 
 -- query Lambda: reads everything for the API, and may change only the four
