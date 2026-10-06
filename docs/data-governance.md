@@ -67,15 +67,20 @@ Every row is checked before anything is stored. Rules are applied in `fintrust/v
 | Validity | `amount` is a positive number with at most two decimals; `tx_type` is `CREDIT` or `DEBIT`; `currency` is a three-letter code; `country_code` is a two-letter code; `tx_date` is a real date and time |
 | Timeliness | `tx_date` is not in the future |
 | Uniqueness | A `transaction_id` may appear once per file; the queue's deduplication and the ledger's primary key stop the same transaction being stored twice |
-| Consistency | `account_id` matches the expected format; the account must exist in the ledger (enforced by a foreign key) |
+| Consistency | `transaction_id` and `account_id` match the expected formats; the account must exist in the ledger (enforced by a foreign key when the transaction is scored) |
 | Sanitisation | Leading and trailing spaces removed; control characters removed; text fields limited in length; values that could be read as spreadsheet formulas are neutralised |
+| POPIA minimality | Columns the system does not need (for example a customer name) are never read. Email addresses, phone numbers and ID or card numbers found in free-text fields are replaced with `[REDACTED]` before the row is stored, queued or logged |
+| File-level checks | UTF-8 text, a header containing every required column, at most 10 MB and 5,000 rows |
+
+A row that fails is reported with **every** reason, not only the first, so it can be corrected in one pass.
 
 ### What happens to records that fail
 
 | Failure | Destination | Who is told |
 |---|---|---|
 | A row fails validation | Written to the **S3 quarantine bucket** with the row number and every reason; valid rows in the same file continue | Counted in the `RowsQuarantined` metric; visible on the dashboard |
-| A whole file is unreadable (not CSV, wrong header) | The file is copied to quarantine; nothing is queued | Error log and the error-rate alarm |
+| A whole file is unusable (not UTF-8, wrong header, too large) | A rejection report naming the file and the reason is written to the quarantine bucket; nothing is queued | Error log and the error-rate alarm |
+| The ingest function itself fails | Lambda retries twice, then sends the S3 event to the **ingest dead-letter queue** | Error log and the error-rate alarm |
 | A valid message cannot be scored after 3 attempts | **SQS dead-letter queue**, kept for 14 days | CloudWatch alarm on DLQ depth emails the data steward |
 | The cause is fixed | DLQ is redriven to the main queue and processed normally | Recorded in the transaction's journey |
 

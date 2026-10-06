@@ -202,3 +202,68 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 | Rubric C5: lifecycle policy with named retention periods | Implemented as real lifecycle rules, not only documented |
 
 **Open items carried forward:** S3 trigger and ingest DLQ setting (Week 13 Day 4); full dead-letter test through the scoring Lambda (Week 13 Day 5 and Week 14 Day 5).
+
+---
+
+## Week 13 Day 4: ETL Lambda
+
+**Completed:** 6 October 2026
+
+**Brief requirement:** "ingest.py complete: S3 CSV trigger, row-level validation, risk pre-score, RDS insert and DynamoDB put, structured JSON logging via print() for CloudWatch Logs Insights."
+
+### What was built
+
+| Item | Where |
+|---|---|
+| Row and header validation, sanitisation and POPIA redaction | `fintrust/validators.py` |
+| Risk rules as pure functions, shared by ingest (pre-score) and score | `fintrust/rules.py` |
+| Ingest Lambda: extract, validate, quarantine, pre-score, load, record | `fintrust/ingest.py` |
+| Lambda packaging and deployment, S3 trigger, dead-letter setting | `infrastructure/lambda/deploy_function.sh` |
+| Sample CSV files (valid, and mixed with one error per rule) | `data/` |
+| Live verification: uploads a file and checks what happened to every row | `scripts/verify_ingest.py` |
+| Logs Insights queries for the structured logs | `docs/logs-insights-queries.md` |
+| Carried from Day 3: S3-to-Lambda trigger and the ingest function's dead-letter queue | applied by `deploy_function.sh` |
+
+### Key decisions
+
+1. **Ingest does not write to RDS.** The brief's Day 4 line says "RDS insert", but the architecture diagram and rubric C1 put the ledger write in the scoring Lambda, and that reading was confirmed on 6 October. Ingest sends each valid transaction to the FIFO queue; the scoring Lambda (Week 13 Day 5) inserts it. Ingest does write to DynamoDB: the journey steps.
+2. **The rules live in one module, `rules.py`.** Ingest runs the two rules that need only the row (amount, cross-border) as the pre-score; scoring runs all three. One source of truth means the pre-score can never disagree with the final rules.
+3. **A bad row never stops a good row.** Rows are judged one by one; the rejected ones go to quarantine with every reason, and the rest continue.
+4. **Three outcomes, no fourth.** A row is queued or quarantined; if the function itself fails, the whole event goes to the dead-letter queue. `rows_read = rows_queued + rows_quarantined` is logged for every file.
+5. **Safe to retry.** Output objects have fixed names and the queue ignores a repeated transaction id, so Lambda's automatic retries cannot create duplicates.
+6. **The journey is an audit trail, not a dependency.** If DynamoDB is unavailable, transactions are still queued and the failure is logged and counted.
+7. **Personal information is removed at the door.** Unneeded columns are never read; identifiers found in free text are redacted before anything is stored, queued or logged.
+8. **DynamoDB write capacity raised from 5 to 10 units** on the table and index (20 of the 25 free units), because each transaction writes about five small items.
+
+### Test results
+
+- `pytest`: 437 passing (373 unit, 64 integration). Package coverage 99%.
+- 44 ingest tests run the real handler against simulated S3, SQS FIFO and DynamoDB, covering valid, mixed and unusable files, retries, partial queue failures and log content.
+- The deploy script was run against a local AWS simulator (create and update paths). `verify_ingest.py` was run there with the real handler reading its settings from Parameter Store: 15 of 16 checks passed; the 16th (dead-letter setting) cannot be read back from the simulator and is checked on the real account.
+- Found and fixed during testing: an ID number followed by a phone number was only partly redacted.
+
+### Evidence to capture (save in `docs/evidence/`)
+
+- [ ] `w13d4-verify-ingest.png`: terminal output of `python scripts/verify_ingest.py` ending in "16 of 16 checks passed"
+- [ ] `w13d4-lambda-function.png`: Lambda console, `fintrust-capstone-ingest`, the Function overview diagram showing the S3 trigger
+- [ ] `w13d4-lambda-dlq.png`: the same function, Configuration tab, Asynchronous invocation, showing the dead-letter queue and 2 retries
+- [ ] `w13d4-logs-insights.png`: CloudWatch Logs Insights, the first query from `docs/logs-insights-queries.md`, showing structured JSON fields (this is one of the brief's required screenshots)
+- [ ] `w13d4-quarantine-file.png`: S3 console, quarantine bucket, the `.rejected.csv` object opened or previewed
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| S3 CSV trigger | Met |
+| Row-level validation | Met |
+| Risk pre-score | Met |
+| RDS insert | Moved to the scoring Lambda (Week 13 Day 5), following the architecture diagram and rubric C1 |
+| DynamoDB put | Met (journey steps) |
+| Structured JSON logging via print() | Met |
+| Day 3 carry-over: trigger wired, DLQ configured on ingest Lambda | Met |
+| Brief: validators.py "input sanitisation and POPIA-aware field checking" | Met |
+| Brief evidence: Logs Insights screenshot of structured JSON from a Lambda | Query provided; screenshot listed above |
+| Rubric C3: boto3 clients at module level, structured JSON logging | Met |
+| Rubric C5: data quality framework | Implemented and documented |
+
+**Open items carried forward:** `POST /upload` (Week 14 Day 1) will write into the same raw bucket and reuse this pipeline unchanged; custom metrics and alarms (Week 14 Day 2).
