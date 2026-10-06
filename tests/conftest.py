@@ -109,6 +109,80 @@ def events_table(aws, monkeypatch):
 
 
 # ----------------------------------------------------------------------------
+# The ingest pipeline's AWS resources (moto)
+# ----------------------------------------------------------------------------
+RAW_BUCKET = "fintrust-capstone-raw-test"
+PROCESSED_BUCKET = "fintrust-capstone-processed-test"
+QUARANTINE_BUCKET = "fintrust-capstone-quarantine-test"
+QUEUE_NAME = "fintrust-capstone-transactions.fifo"
+
+
+class Pipeline:
+    """Handles to the fake resources, with helpers the tests read results through."""
+
+    def __init__(self, s3, sqs, queue_url):
+        self.s3 = s3
+        self.sqs = sqs
+        self.queue_url = queue_url
+
+    def upload(self, key, body, bucket=RAW_BUCKET):
+        data = body.encode("utf-8") if isinstance(body, str) else body
+        self.s3.put_object(Bucket=bucket, Key=key, Body=data)
+
+    def event(self, key, bucket=RAW_BUCKET):
+        """An S3 notification event like the one Lambda receives (key URL-encoded)."""
+        from urllib.parse import quote_plus
+
+        return {"Records": [{"s3": {"bucket": {"name": bucket}, "object": {"key": quote_plus(key, safe="/")}}}]}
+
+    def read(self, bucket, key):
+        return self.s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8")
+
+    def keys(self, bucket):
+        return [item["Key"] for item in self.s3.list_objects_v2(Bucket=bucket).get("Contents", [])]
+
+    def messages(self):
+        """Drain the queue and return every message, with its FIFO attributes."""
+        import json
+
+        found = []
+        while True:
+            response = self.sqs.receive_message(
+                QueueUrl=self.queue_url, MaxNumberOfMessages=10, AttributeNames=["All"], WaitTimeSeconds=0
+            )
+            batch = response.get("Messages", [])
+            if not batch:
+                return found
+            for message in batch:
+                found.append(
+                    {
+                        "body": json.loads(message["Body"]),
+                        "group": message["Attributes"]["MessageGroupId"],
+                        "deduplication_id": message["Attributes"]["MessageDeduplicationId"],
+                    }
+                )
+                self.sqs.delete_message(QueueUrl=self.queue_url, ReceiptHandle=message["ReceiptHandle"])
+
+
+@pytest.fixture
+def pipeline(events_table, monkeypatch):
+    """Fake buckets, FIFO queue and events table, with config pointing at them."""
+    s3 = boto3.client("s3", region_name=REGION)
+    for bucket in (RAW_BUCKET, PROCESSED_BUCKET, QUARANTINE_BUCKET):
+        s3.create_bucket(Bucket=bucket, CreateBucketConfiguration={"LocationConstraint": REGION})
+    sqs = boto3.client("sqs", region_name=REGION)
+    queue_url = sqs.create_queue(
+        QueueName=QUEUE_NAME, Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "false"}
+    )["QueueUrl"]
+
+    monkeypatch.setenv("FINTRUST_RAW_BUCKET", RAW_BUCKET)
+    monkeypatch.setenv("FINTRUST_PROCESSED_BUCKET", PROCESSED_BUCKET)
+    monkeypatch.setenv("FINTRUST_QUARANTINE_BUCKET", QUARANTINE_BUCKET)
+    monkeypatch.setenv("FINTRUST_QUEUE_URL", queue_url)
+    return Pipeline(s3, sqs, queue_url)
+
+
+# ----------------------------------------------------------------------------
 # PostgreSQL (integration tests only)
 #
 # Integration tests need a real PostgreSQL, because moto cannot fake a database
