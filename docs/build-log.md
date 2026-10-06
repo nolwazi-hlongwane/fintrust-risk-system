@@ -136,3 +136,69 @@ Brief calendar: Week 13 Day 1 = 28 September 2026, Week 14 Day 1 = 5 October 202
 | Rubric C4: integration tests scoped to develop | Met |
 
 **Open items carried forward:** the four analytical SQL artefacts (`risk_report.sql`, `monthly_summary.sql`, `views.sql`, `flag_account`) are scheduled in the brief for Week 14 Day 4; ERD and architecture PDF exports; DynamoDB encryption moves to the customer-managed KMS key when that key is created in Week 13 Day 3.
+
+---
+
+## Week 13 Day 3: Security and Storage
+
+**Completed:** 6 October 2026
+
+**Brief requirement:** "KMS-encrypted S3 buckets (raw, processed, quarantine), least-privilege IAM roles applied, S3-to-Lambda trigger wired, DLQ configured on ingest Lambda."
+
+### What was built
+
+| Item | Where |
+|---|---|
+| Customer-managed KMS key with yearly rotation | `infrastructure/kms/deploy_key.sh` |
+| Four buckets (raw, processed, quarantine, reports): SSE-KMS, Block Public Access, versioning, TLS-only policy, lifecycle rules | `infrastructure/s3/` |
+| Lifecycle: Standard-IA at 30 days, Glacier at 3 years, deleted at 7 years; quarantine deleted at 90 days | `infrastructure/s3/lifecycle-*.json` |
+| Transaction FIFO queue with a FIFO dead-letter queue after 3 failed receives | `infrastructure/sqs/deploy_queues.sh` |
+| Standard dead-letter queue for failed ingest invocations | `infrastructure/sqs/deploy_queues.sh` |
+| Least-privilege data permissions for the ingest and score roles | `infrastructure/iam/policies/ingest-data.json`, `score-data.json` |
+| Live verification of every control, including a real dead-letter test | `scripts/verify_storage.py` |
+
+### Key decisions
+
+1. **One customer-managed key** for buckets and queues. The key policy delegates to IAM, and each role's policy names exactly which key actions it may use.
+2. **DynamoDB stays on default encryption** (AWS owned key) instead of the customer-managed key. The table holds no customer details, and this avoids KMS charges on every read and write. This changes the earlier plan and is recorded in the security plan.
+3. **Versioning on all four buckets**, so an overwritten or deleted record can be recovered inside the retention period.
+4. **Visibility timeout of 60 seconds**, twice the scoring Lambda's 30-second timeout. It must exceed the function timeout so a message is never handed to a second worker mid-processing. AWS suggests up to six times; twice was chosen so a message that keeps failing reaches the dead-letter queue in about 3 minutes instead of 9.
+5. **`maxReceiveCount` of 3**: enough to ride out a brief database blip, low enough that a genuinely bad message stops blocking its account quickly.
+6. **Ingest can read raw but not write it, and write processed and quarantine but not read them.** No role can delete an object, list a bucket, purge a queue or manage the key.
+
+### Deferred within this phase
+
+The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" under Day 3. Both are settings **on the ingest function**, which is the Week 13 Day 4 deliverable. Day 3 creates everything they depend on (the raw bucket, the ingest dead-letter queue, and the role permissions to use them); the trigger and the function's dead-letter setting are applied by the Day 4 deploy script when the real function is created. No stand-in function was deployed.
+
+### Test results
+
+- `pytest`: 274 passing (210 unit, 64 integration).
+- New unit tests fail the build if a retention period drifts from the lifecycle policy, if any bucket protection is removed from the deploy script, or if any role gains a delete, list, purge or key-management action.
+- KMS, S3, SQS and policy scripts were run, and re-run, against a local AWS simulator. `verify_storage.py` ran there too, including the dead-letter test (three deliveries, fourth refused, message found in the DLQ).
+- Found and fixed during testing: helper functions did not stop on an AWS error, and a queue URL could not be stored as a parameter by older AWS CLI versions.
+- **Not provable in the simulator:** the TLS-only bucket policy (the simulator has no TLS) and real KMS permission checks. Both are verified on the real account by `verify_storage.py`.
+
+### Evidence to capture (save in `docs/evidence/`)
+
+- [ ] `w13d3-verify-storage.png`: terminal output of `python scripts/verify_storage.py` ending in "43 of 43 checks passed"
+- [ ] `w13d3-s3-buckets.png`: S3 console, the four `fintrust-capstone-*` buckets
+- [ ] `w13d3-s3-encryption.png`: raw bucket, Properties tab, Default encryption showing SSE-KMS and the key
+- [ ] `w13d3-s3-lifecycle.png`: raw bucket, Management tab, the lifecycle rule
+- [ ] `w13d3-sqs-queues.png`: SQS console, the three queues
+- [ ] `w13d3-sqs-dlq.png`: transactions queue, Dead-letter queue tab showing maximum receives 3
+- [ ] `w13d3-kms-key.png`: KMS console, Customer managed keys, `fintrust-capstone` with rotation enabled
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| KMS-encrypted S3 buckets (raw, processed, quarantine) | Met, plus the reports bucket |
+| Least-privilege IAM roles applied | Met for ingest and score; query and report gain their remaining permissions with their own phases |
+| S3-to-Lambda trigger wired | Prerequisites met; applied in Week 13 Day 4 with the function |
+| DLQ configured on ingest Lambda | Queue and permission created; applied in Week 13 Day 4 with the function |
+| Brief Week 3: encryption at rest, KMS key policy, lifecycle rules | Met |
+| Brief Week 7: SQS FIFO queue with DLQ | Met and proved by a live test |
+| Rubric C1: every Lambda role least-privilege | On track; enforced by tests |
+| Rubric C5: lifecycle policy with named retention periods | Implemented as real lifecycle rules, not only documented |
+
+**Open items carried forward:** S3 trigger and ingest DLQ setting (Week 13 Day 4); full dead-letter test through the scoring Lambda (Week 13 Day 5 and Week 14 Day 5).

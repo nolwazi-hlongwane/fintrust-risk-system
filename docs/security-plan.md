@@ -18,17 +18,17 @@ One row per Lambda function. "Base" permissions are deployed now; the rest are t
 | **ingest** (`fintrust-capstone-ingest-role`) | `logs:CreateLogStream`, `logs:PutLogEvents` | Its own log group only | Deployed W13 D1 |
 | | `xray:PutTraceSegments`, `xray:PutTelemetryRecords` | `*` (AWS does not support a narrower resource) | Deployed W13 D1 |
 | | `ssm:GetParametersByPath` | `/fintrust/dev/*` | Deployed W13 D1 |
-| | `s3:GetObject` | Raw bucket objects | W13 D3 |
-| | `s3:PutObject` | Processed and quarantine bucket objects | W13 D3 |
-| | `sqs:SendMessage` | Transactions FIFO queue; ingest DLQ | W13 D3 |
-| | `dynamodb:PutItem` | Events table | W13 D3 |
-| | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | W13 D3 |
+| | `s3:GetObject` | Raw bucket objects | Deployed W13 D3 |
+| | `s3:PutObject` | Processed and quarantine bucket objects | Deployed W13 D3 |
+| | `sqs:SendMessage` | Transactions FIFO queue; ingest DLQ | Deployed W13 D3 |
+| | `dynamodb:PutItem` | Events table | Deployed W13 D3 |
+| | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | Deployed W13 D3 |
 | **score** (`fintrust-capstone-score-role`) | Logs, X-Ray (as above) | Its own log group | Deployed W13 D1 |
 | | Six `ec2:` network interface actions | `*` (required for any Lambda in a VPC) | Deployed W13 D1 |
 | | `rds-db:connect` | Database user `fintrust_score` only | Deployed W13 D2 |
 | | `dynamodb:PutItem`, `dynamodb:UpdateItem` | Events table | Deployed W13 D2 |
-| | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` | Transactions FIFO queue | W13 D3 |
-| | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | W13 D3 |
+| | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` | Transactions FIFO queue | Deployed W13 D3 |
+| | `kms:Decrypt` | The project key | Deployed W13 D3 |
 | **alert** (`fintrust-capstone-alert-role`) | Logs, X-Ray, SSM (as ingest) | Own log group; `/fintrust/dev/*` | Deployed W13 D1 |
 | | `dynamodb:GetRecords`, `GetShardIterator`, `DescribeStream`, `ListStreams` | Events table stream | W14 D1 |
 | | `dynamodb:PutItem` | Events table | W14 D1 |
@@ -38,7 +38,7 @@ One row per Lambda function. "Base" permissions are deployed now; the rest are t
 | | `rds-db:connect` | Database user `fintrust_query` only | Deployed W13 D2 |
 | | `dynamodb:Query`, `dynamodb:GetItem` | Events table and its index | Deployed W13 D2 |
 | | `s3:PutObject` | Raw bucket, `uploads/` prefix only | W14 D1 |
-| | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | W13 D3 |
+| | `kms:GenerateDataKey` | The project key | W14 D1 |
 | **report** (`fintrust-capstone-report-role`) | Logs, X-Ray, network interfaces (as score) | Own log group | Deployed W13 D1 |
 | | `rds-db:connect` | Database user `fintrust_report` only | Deployed W13 D2 |
 | | `s3:PutObject` | Reports bucket objects | W14 D4 |
@@ -84,12 +84,14 @@ So even if the report Lambda's code were compromised, both IAM and the database 
 | Data | At rest | In transit |
 |---|---|---|
 | S3 buckets | SSE-KMS with the customer-managed key; bucket key enabled to reduce KMS calls | Bucket policy denies requests without TLS |
-| DynamoDB | KMS customer-managed key | HTTPS |
+| DynamoDB | Encrypted by default with an AWS owned key (no customer details are stored in this table) | HTTPS |
 | SQS queues | KMS customer-managed key | HTTPS |
 | RDS | Storage encryption enabled | TLS required for every connection (`sslmode=require`; IAM authentication only works over TLS) |
 | SSM parameters | Standard parameters hold no secrets | HTTPS |
 
-The customer-managed key has automatic yearly rotation enabled, and its key policy names which roles may use it.
+The customer-managed key (`alias/fintrust-capstone`) has automatic yearly rotation enabled. Its key policy is the AWS default, which hands control to IAM in this account; which role may use the key, and how, is then written in that role's own policy next to its other permissions. Only `kms:Decrypt` and `kms:GenerateDataKey` are ever granted, and a test fails the build if any role is given a key-management action.
+
+The bucket policy uses `"Action": "s3:*"` in a **Deny** statement (refuse anything not sent over TLS). A wildcard in a Deny removes access; it cannot grant any. The "no wildcard actions" rule applies to the Allow statements in the Lambda roles.
 
 ## Authentication summary
 

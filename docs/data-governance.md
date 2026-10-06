@@ -37,7 +37,7 @@ Directly identifying fields (`full_name`, `email`, `phone_number`) exist only in
 
 | Question | Answer |
 |---|---|
-| How is it stored? | RDS PostgreSQL in private subnets with storage encryption; S3, DynamoDB and SQS encrypted with a customer-managed KMS key; TLS on every connection |
+| How is it stored? | RDS PostgreSQL in private subnets with storage encryption; S3 and SQS encrypted with a customer-managed KMS key; DynamoDB encrypted at rest by default; TLS on every connection |
 | Who can access it? | Compliance staff, through the API with an API key. Each Lambda only through its own least-privilege role and its own database user. No direct database access from the internet |
 | What leaves the system? | Alert emails carry the transaction id, a masked account id, the score and the rules. No names or contact details |
 | How long is it kept? | See section 3 |
@@ -94,7 +94,7 @@ No record is silently dropped: every row ends in the ledger, in quarantine, or i
 How it is enforced:
 
 - **S3 Lifecycle rules** move objects between storage classes and expire them at 7 years. This is automatic; nobody has to remember to do it.
-- **S3 Versioning** on the raw and reports buckets protects records from accidental overwrite or deletion during the retention period.
+- **S3 Versioning** on all four buckets protects records from accidental overwrite or deletion during the retention period.
 - **Quarantine bucket:** 90 days, long enough to correct and resubmit, short enough not to keep faulty personal data.
 - **CloudWatch Logs:** 30 days. Logs carry identifiers only.
 - **DynamoDB events:** 12 months, removed with a time-to-live attribute.

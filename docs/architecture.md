@@ -70,7 +70,7 @@ Three consequences, each a deliberate decision:
 | **Lambda** | Runs across multiple AZs automatically; retries on failure | One least-privilege role per function | Scales per event, warm containers reuse connections | Pay per request, nothing when idle |
 | **SQS FIFO + DLQ** | Messages survive a scoring outage; DLQ keeps failed messages for 14 days | Encrypted with KMS; only ingest may send, only score may receive | Buffers bursts so RDS is not overwhelmed | 1M requests free |
 | **RDS PostgreSQL** | Automated backups; Multi-AZ is the documented production upgrade | Private subnets, no public endpoint, security group allows port 5432 from the Lambda security group only, IAM database authentication, encrypted at rest | Indexed relational queries, joins, window functions | db.t3.micro, stopped outside working hours |
-| **DynamoDB** | Multi-AZ by default, no maintenance | Encrypted with KMS, access by IAM | Single-digit millisecond lookups by account | 25 GB and 25 capacity units free |
+| **DynamoDB** | Multi-AZ by default, no maintenance | Encrypted at rest by default, access by IAM, holds no customer details | Single-digit millisecond lookups by account | 25 GB and 25 capacity units free |
 | **API Gateway** | Managed, multi-AZ | API key, usage plan throttling, TLS only | Handles bursts without servers | 1M calls free |
 | **SES** | Managed delivery with retries | Verified identities only; role limited to one sender | Asynchronous from scoring | 3,000 messages free |
 | **EventBridge** | Managed scheduler with retries | Can invoke only the report Lambda | Not applicable | Free |
