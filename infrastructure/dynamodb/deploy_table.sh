@@ -6,8 +6,10 @@
 #   Sort key       tx_timestamp  (S)   starts with the transaction time, so items
 #                                      are stored in time order
 #   Index          by_transaction      look up one transaction without the account
-#   Capacity       5 read + 5 write units on the table and on the index
-#                  (10 + 10 of the 25 + 25 units in the Free Tier)
+#   Capacity       5 read + 10 write units on the table and on the index
+#                  (10 read + 20 write of the 25 + 25 units in the Free Tier).
+#                  Each transaction writes about 5 small items (journey steps
+#                  and its score), so writes need more room than reads.
 #   Stream         NEW_IMAGE           used in Week 14 Day 1 to trigger alerts
 #   Time-to-live   expires_at          items delete themselves after 12 months
 #
@@ -29,7 +31,7 @@ else
           AttributeName=account_id,KeyType=HASH \
           AttributeName=tx_timestamp,KeyType=RANGE \
       --billing-mode PROVISIONED \
-      --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+      --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=10 \
       --global-secondary-indexes '[{
           "IndexName": "by_transaction",
           "KeySchema": [
@@ -37,13 +39,25 @@ else
             {"AttributeName": "tx_timestamp", "KeyType": "RANGE"}
           ],
           "Projection": {"ProjectionType": "ALL"},
-          "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
+          "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 10}
         }]' \
       --stream-specification StreamEnabled=true,StreamViewType=NEW_IMAGE \
       --tags Key=Project,Value=fintrust-capstone >/dev/null
   echo "Creating table $TABLE_NAME..."
 fi
 aws dynamodb wait table-exists --table-name "$TABLE_NAME"
+
+# Bring an existing table up to the capacity above (it was created with 5 write units).
+CURRENT_WCU="$(aws dynamodb describe-table --table-name "$TABLE_NAME" \
+    --query 'Table.ProvisionedThroughput.WriteCapacityUnits' --output text)"
+if [[ "$CURRENT_WCU" != "10" ]]; then
+  aws dynamodb update-table --table-name "$TABLE_NAME" \
+      --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=10 \
+      --global-secondary-index-updates '[{"Update": {"IndexName": "by_transaction",
+          "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 10}}}]' >/dev/null
+  aws dynamodb wait table-exists --table-name "$TABLE_NAME"
+  echo "Raised write capacity to 10 units on the table and its index"
+fi
 
 TTL_STATUS="$(aws dynamodb describe-time-to-live --table-name "$TABLE_NAME" \
     --query 'TimeToLiveDescription.TimeToLiveStatus' --output text)"
