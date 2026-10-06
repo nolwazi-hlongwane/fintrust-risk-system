@@ -14,11 +14,7 @@
 HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/../common.sh"
 
-put() {
-  aws ssm put-parameter --name "/fintrust/${FINTRUST_ENV}/$1" --value "$2" \
-      --type String --overwrite >/dev/null
-  echo "  /fintrust/${FINTRUST_ENV}/$1"
-}
+put() { put_param "$1" "$2"; }
 
 if [[ $# -eq 2 ]]; then
   put "$1" "$2"
