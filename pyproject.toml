@@ -14,6 +14,7 @@ markers = [
 
 [tool.ruff]
 line-length = 120
+extend-exclude = ["build"]   # downloaded third-party code packaged for Lambda
 target-version = "py313"
 
 [tool.ruff.lint]

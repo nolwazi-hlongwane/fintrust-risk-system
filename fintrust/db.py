@@ -46,6 +46,10 @@ class DatabaseError(Exception):
     """A database operation failed. The transaction has been rolled back."""
 
 
+class DatabaseUnavailable(DatabaseError):
+    """The database could not be reached at all (for example, RDS is stopped)."""
+
+
 def _connect():
     """Open a new connection using settings from config."""
     host = config.get("db_host")
@@ -90,7 +94,7 @@ def get_connection():
         except psycopg2.Error as error:
             _connection = None
             logger.error("db_connect_failed", error=str(error).strip())
-            raise DatabaseError("Could not connect to the database") from error
+            raise DatabaseUnavailable("Could not connect to the database") from error
     return _connection
 
 

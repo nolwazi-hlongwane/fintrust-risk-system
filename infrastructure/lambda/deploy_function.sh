@@ -2,14 +2,20 @@
 # Package and deploy one Lambda function, then wire up what triggers it.
 #
 #   ./infrastructure/lambda/deploy_function.sh ingest
+#   ./infrastructure/lambda/deploy_function.sh score
+#   ./infrastructure/lambda/deploy_function.sh query
 #
 # What it does:
-#   1. Builds a zip of the fintrust/ package in build/ (ignored by git).
+#   1. Builds a zip of the fintrust/ package in build/ (ignored by git). For
+#      functions that use the database, the PostgreSQL driver (psycopg2) built
+#      for Lambda's Linux is added to the zip.
 #   2. Creates the function, or updates its code and settings if it exists.
-#   3. Applies the function's own wiring. For ingest:
-#        - failed invocations go to the ingest dead-letter queue (after 2 retries)
-#        - the raw bucket may invoke the function (resource-based permission)
-#        - the raw bucket sends an event for every new .csv object
+#      Functions that use the database are placed in the VPC's private subnets.
+#   3. Applies the function's own wiring:
+#        ingest  failed invocations go to the ingest dead-letter queue (after 2
+#                retries); the raw bucket invokes it for every new .csv object
+#        score   the transactions FIFO queue is connected as its event source
+#        query   nothing here; API Gateway is connected by deploy_api.sh
 #
 # Safe to run more than once: run it again after any code change.
 
@@ -26,9 +32,23 @@ case "$FN" in
     IN_VPC="no"          # needs SQS (no free VPC endpoint) and never touches RDS
     DESCRIPTION="FinTrust ETL: validate uploaded CSV rows, quarantine bad ones, queue good ones"
     ;;
+  score)
+    HANDLER="fintrust.score.handler"
+    TIMEOUT=30           # must stay below the queue's 60 second visibility timeout
+    MEMORY=256
+    IN_VPC="yes"         # needs the database
+    DESCRIPTION="FinTrust scoring: apply risk rules, write the ledger (RDS) and the score (DynamoDB)"
+    ;;
+  query)
+    HANDLER="fintrust.query.handler"
+    TIMEOUT=15           # API Gateway gives up after 29 seconds
+    MEMORY=256
+    IN_VPC="yes"         # needs the database
+    DESCRIPTION="FinTrust REST API: transactions, journey and risk insights"
+    ;;
   *)
     echo "Usage: $0 <function>" >&2
-    echo "Functions available so far: ingest" >&2
+    echo "Functions available so far: ingest, score, query" >&2
     exit 1
     ;;
 esac
@@ -44,11 +64,33 @@ mkdir -p "$BUILD"
 cp -R "$ROOT/fintrust" "$BUILD/fintrust"
 find "$BUILD" -name "__pycache__" -type d -prune -exec rm -rf {} +
 # boto3 is already provided by the Lambda Python runtime, so it is not packaged.
+if [[ "$IN_VPC" == "yes" ]]; then
+  # psycopg2 contains compiled code, so the copy installed on a Mac will not run
+  # on Lambda. This downloads the ready-built Linux version instead, pinned to
+  # the same version as requirements.txt.
+  PSYCOPG_VERSION="$(grep -E '^psycopg2-binary==' "$ROOT/requirements.txt" | cut -d= -f3)"
+  python3 -m pip install --quiet --disable-pip-version-check \
+      --platform manylinux2014_x86_64 --implementation cp --python-version 3.13 \
+      --only-binary=:all: --no-deps --target "$BUILD" "psycopg2-binary==${PSYCOPG_VERSION}"
+  rm -rf "$BUILD"/*.dist-info
+fi
 (cd "$BUILD" && zip -qr "$ZIP" .)
 echo "Built $(basename "$ZIP") ($(du -h "$ZIP" | cut -f1 | tr -d ' '))"
 
 # ---------- 2. create or update ----------
-ENVIRONMENT="Variables={FINTRUST_ENV=${FINTRUST_ENV}}"
+python3 "$HERE/build_env.py" "$FN" > "$ROOT/build/$FN-env.json"
+ENVIRONMENT="file://$ROOT/build/$FN-env.json"
+
+VPC_ARGS=()
+if [[ "$IN_VPC" == "yes" ]]; then
+  SUBNET_A="$(subnet_id a)"; SUBNET_B="$(subnet_id b)"; LAMBDA_SG="$(sg_id lambda)"
+  if [[ -z "$SUBNET_A" || -z "$SUBNET_B" || -z "$LAMBDA_SG" ]]; then
+    echo "ERROR: network not found. Run ./infrastructure/network/deploy_network.sh first." >&2
+    exit 1
+  fi
+  # Two subnets in two Availability Zones: if one zone fails, Lambda runs in the other.
+  VPC_ARGS=(--vpc-config "SubnetIds=${SUBNET_A},${SUBNET_B},SecurityGroupIds=${LAMBDA_SG}")
+fi
 
 if aws lambda get-function --function-name "$FUNCTION_NAME" >/dev/null 2>&1; then
   aws lambda update-function-code --function-name "$FUNCTION_NAME" --zip-file "fileb://$ZIP" >/dev/null
@@ -56,7 +98,7 @@ if aws lambda get-function --function-name "$FUNCTION_NAME" >/dev/null 2>&1; the
   aws lambda update-function-configuration --function-name "$FUNCTION_NAME" \
       --handler "$HANDLER" --runtime python3.13 --role "$ROLE_ARN" \
       --timeout "$TIMEOUT" --memory-size "$MEMORY" \
-      --environment "$ENVIRONMENT" --tracing-config Mode=Active >/dev/null
+      --environment "$ENVIRONMENT" --tracing-config Mode=Active ${VPC_ARGS[@]+"${VPC_ARGS[@]}"} >/dev/null
   aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
   echo "Updated function $FUNCTION_NAME"
 else
@@ -66,8 +108,11 @@ else
       --handler "$HANDLER" --role "$ROLE_ARN" \
       --zip-file "fileb://$ZIP" \
       --timeout "$TIMEOUT" --memory-size "$MEMORY" \
-      --environment "$ENVIRONMENT" --tracing-config Mode=Active \
+      --environment "$ENVIRONMENT" --tracing-config Mode=Active ${VPC_ARGS[@]+"${VPC_ARGS[@]}"} \
       --tags Project=fintrust-capstone >/dev/null
+  if [[ "$IN_VPC" == "yes" ]]; then
+    echo "Attaching the function to the VPC (this can take a minute or two)..."
+  fi
   aws lambda wait function-active-v2 --function-name "$FUNCTION_NAME"
   echo "Created function $FUNCTION_NAME"
 fi
@@ -109,7 +154,26 @@ if [[ "$FN" == "ingest" ]]; then
   echo "S3 trigger wired: ${RAW_BUCKET} (*.csv) -> ${FUNCTION_NAME}"
 fi
 
+if [[ "$FN" == "score" ]]; then
+  QUEUE_ARN="$(queue_arn "$QUEUE_NAME")"
+  MAPPING="$(aws lambda list-event-source-mappings --function-name "$FUNCTION_NAME" \
+      --event-source-arn "$QUEUE_ARN" --query 'EventSourceMappings[0].UUID' --output text | none_to_empty)"
+  if [[ -z "$MAPPING" ]]; then
+    # The Lambda service polls the queue and invokes the function with up to 10
+    # messages. ReportBatchItemFailures lets the function say exactly which
+    # messages failed, so only those are retried.
+    aws lambda create-event-source-mapping --function-name "$FUNCTION_NAME" \
+        --event-source-arn "$QUEUE_ARN" --batch-size 10 \
+        --function-response-types ReportBatchItemFailures >/dev/null
+    echo "Queue connected: ${QUEUE_NAME} -> ${FUNCTION_NAME}"
+  else
+    aws lambda update-event-source-mapping --uuid "$MAPPING" --batch-size 10 \
+        --function-response-types ReportBatchItemFailures >/dev/null
+    echo "Queue already connected: ${QUEUE_NAME} -> ${FUNCTION_NAME}"
+  fi
+fi
+
 echo
 aws lambda get-function-configuration --function-name "$FUNCTION_NAME" \
-    --query '{Function:FunctionName,Runtime:Runtime,Handler:Handler,Timeout:Timeout,Memory:MemorySize,State:State,DeadLetterQueue:DeadLetterConfig.TargetArn,Tracing:TracingConfig.Mode}' \
+    --query '{Function:FunctionName,Runtime:Runtime,Handler:Handler,Timeout:Timeout,Memory:MemorySize,State:State,VPC:VpcConfig.VpcId,DeadLetterQueue:DeadLetterConfig.TargetArn,Tracing:TracingConfig.Mode}' \
     --output table

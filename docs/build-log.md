@@ -267,3 +267,72 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 | Rubric C5: data quality framework | Implemented and documented |
 
 **Open items carried forward:** `POST /upload` (Week 14 Day 1) will write into the same raw bucket and reuse this pipeline unchanged; custom metrics and alarms (Week 14 Day 2).
+
+---
+
+## Week 13 Day 5: API Backend Part 1
+
+**Completed:** 7 October 2026
+
+**Brief requirement:** "query.py complete: GET /transactions (paginated, filtered by account) and GET /insights (risk summary) behind API Gateway with API key authentication."
+
+### What was built
+
+| Item | Where |
+|---|---|
+| Scoring Lambda: all three rules, ledger insert, score to DynamoDB, per-message failure reporting | `fintrust/score.py` |
+| API Lambda: `/health`, `/transactions`, `/transactions/{id}/journey`, `/insights` | `fintrust/query.py` |
+| REST API definition (OpenAPI 3) | `infrastructure/apigateway/openapi.json` |
+| API Gateway, usage plan (10 requests per second, 5,000 per day) and API key | `infrastructure/apigateway/deploy_api.sh` |
+| Lambda deployment for VPC functions: private subnets, PostgreSQL driver, queue connection | `infrastructure/lambda/deploy_function.sh` |
+| Environment variables for VPC functions, copied from Parameter Store | `infrastructure/lambda/build_env.py` |
+| API key helper that never writes the key to disk | `scripts/api_env.sh` |
+| Live verification through the public API | `scripts/verify_scoring_api.py` |
+
+`score.py` is listed in the brief's package but has no day of its own in the schedule. It is built here because the read API has nothing to read until transactions reach the ledger.
+
+### Key decisions
+
+1. **One database transaction per ledger write.** The transaction row, one `risk_events` row per rule and any alert are committed together or not at all.
+2. **Only the failed message is retried.** The function returns the ids of failed messages (`batchItemFailures`); the rest of the batch is deleted as normal.
+3. **Order is kept per account.** After one message for an account fails, later messages for the same account in the batch are held back too. Other accounts continue.
+4. **Redelivery is harmless.** If a transaction is already in the ledger it is not scored again; its stored result is written to DynamoDB again. This also repairs the case where RDS committed but the DynamoDB write failed.
+5. **An unknown account is a failure, not a guess.** The Lambda never invents an account. The message goes to the dead-letter queue until the account is onboarded, then it is redriven.
+6. **The journey gives a safe reason.** Failed attempts are recorded with a plain-language reason; internal error text stays in the logs.
+7. **The API validates before it queries, and always uses parameterised SQL.** A bad parameter is a 400 with a clear message; user input can never become SQL.
+8. **Errors never leak internals.** An unexpected error returns a generic 500 with a request id that matches the log line.
+9. **The API key is required twice over.** The definition marks every route, and the deploy script sets it again explicitly on each method.
+10. **REST API, not HTTP API**, because only REST APIs support API keys and usage plans.
+
+### Test results
+
+- `pytest`: 540 passing (435 unit, 105 integration against PostgreSQL 16).
+- Integration tests prove on a real database: scores and rule events for every rule combination, the velocity window, atomic rollback when a write fails part-way, no duplicates on redelivery, repair of a missing DynamoDB score, and the break-and-recover scenario (three failures, onboard the account, success).
+- A test re-scores all 275 seed transactions with the Lambda's rules and confirms they match `seed.sql`.
+- All deployment scripts were run against a local AWS simulator, except the step that sets the API key requirement on each method, which the simulator does not implement. `verify_scoring_api.py` passed 21 of 21 there, with the real ingest, score and query handlers running against a real PostgreSQL behind a stand-in for Lambda and API Gateway.
+- **First proven on the real account in this phase:** IAM database authentication from inside the VPC, the DynamoDB gateway endpoint, the queue-to-Lambda connection and API Gateway's key check.
+
+### Evidence to capture (save in `docs/evidence/`)
+
+- [ ] `w13d5-verify-scoring-api.png`: terminal output of `python scripts/verify_scoring_api.py` ending in "21 of 21 checks passed"
+- [ ] `w13d5-api-gateway-stage.png`: API Gateway console, `fintrust-capstone-api`, Stages, `dev`, showing the invoke URL (a required screenshot in the brief)
+- [ ] `w13d5-lambda-functions.png`: Lambda console, the function list showing ingest, score and query (a required screenshot; retaken when all five exist)
+- [ ] `w13d5-curl-transactions.png`: terminal, `curl` of `GET /transactions` returning data (a required screenshot in the brief)
+- [ ] `w13d5-curl-forbidden.png`: terminal, the same `curl` without the key returning 403
+- [ ] `w13d5-usage-plan.png`: API Gateway console, Usage plans, showing the throttle, quota and attached key
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| GET /transactions, paginated and filtered by account | Met |
+| GET /insights, risk summary | Met |
+| Behind API Gateway with API key authentication | Met, with a usage plan |
+| Brief: all RDS responses use `json.dumps(default=str)` | Met |
+| Brief: every psycopg2 except block rolls back | Met (all database work goes through `db.transaction()`) |
+| Brief: score.py "apply risk scoring logic, write score to DynamoDB" | Met |
+| Rubric C1: S3 → ingest → SQS FIFO → scoring → RDS + DynamoDB → API Gateway | Deployed end to end; SES follows in Week 14 Day 1 |
+| Rubric C1: every Lambda role least-privilege | Met for the three deployed functions |
+| Rubric C3: modules present | 8 of 10 (`alert` and `report` remain) |
+
+**Open items carried forward:** `GET /alerts` and the write routes (Week 14 Day 1); the dead-letter test on the real account with redrive (Week 14 Day 5, with an early run once alerts exist).

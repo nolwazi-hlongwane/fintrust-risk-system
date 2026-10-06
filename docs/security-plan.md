@@ -75,7 +75,7 @@ So even if the report Lambda's code were compromised, both IAM and the database 
 | VPC | Two private subnets in two Availability Zones. No internet gateway route, no NAT Gateway |
 | RDS | `PubliclyAccessible = false`, in the private subnets |
 | RDS security group | Inbound PostgreSQL 5432 only from the Lambda security group and the tunnel instance's security group |
-| Lambda security group | No inbound rules. Outbound 5432 to the RDS security group, and HTTPS to the S3 and DynamoDB gateway endpoints |
+| Lambda security group | No inbound rules. Outbound 5432 to the RDS security group, and HTTPS to the S3 and DynamoDB gateway endpoints (by AWS prefix list). Nothing else |
 | Gateway endpoints | S3 and DynamoDB traffic stays on the AWS network |
 | API Gateway | The only public entry point; HTTPS only; API key required; throttled |
 
