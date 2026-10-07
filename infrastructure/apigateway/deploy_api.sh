@@ -31,7 +31,15 @@ fi
 
 mkdir -p "$ROOT/build"
 DEFINITION="$ROOT/build/openapi.json"
-render "$HERE/openapi.json" | sed "s|__LAMBDA_ARN__|${LAMBDA_ARN}|g" > "$DEFINITION"
+# Errors produced by API Gateway itself (a missing key, a throttled request) never
+# reach the Lambda, so their CORS header is set here: the dashboard's address
+# once it is deployed, "*" before that.
+CORS_ORIGIN="$(aws ssm get-parameter --name "/fintrust/${FINTRUST_ENV}/cors_allowed_origin" \
+    --query Parameter.Value --output text 2>/dev/null | cut -d, -f1 || true)"
+CORS_ORIGIN="${CORS_ORIGIN:-*}"
+render "$HERE/openapi.json" \
+    | sed -e "s|__LAMBDA_ARN__|${LAMBDA_ARN}|g" -e "s|__CORS_ORIGIN__|${CORS_ORIGIN}|g" > "$DEFINITION"
+echo "Browser access (CORS) allowed from: ${CORS_ORIGIN}"
 
 # ---------- API ----------
 API_ID="$(aws apigateway get-rest-apis --query "items[?name=='${API_NAME}'].id | [0]" --output text | none_to_empty)"

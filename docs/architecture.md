@@ -7,7 +7,9 @@ The final draw.io diagram and its PDF export are kept in `docs/diagrams/`.
 
 ```mermaid
 flowchart LR
-    U[Compliance officer<br/>dashboard / curl] -->|x-api-key| APIGW[API Gateway<br/>REST API + usage plan]
+    U[Compliance officer<br/>browser] -->|HTTPS| CF[CloudFront]
+    CF -->|origin access control| WEB[(S3 dashboard bucket<br/>private)]
+    U -->|x-api-key| APIGW[API Gateway<br/>REST API + usage plan]
     APIGW --> Q[query Lambda<br/>in VPC]
     Q -->|POST /upload stores CSV| RAW[(S3 raw bucket)]
     RAW -->|ObjectCreated event| ING[ingest Lambda<br/>outside VPC]
@@ -74,6 +76,7 @@ Three consequences, each a deliberate decision:
 | **API Gateway** | Managed, multi-AZ | API key, usage plan throttling, TLS only | Handles bursts without servers | 1M calls free |
 | **SES** | Managed delivery with retries | Verified identities only; role limited to one sender | Asynchronous from scoring | 3,000 messages free |
 | **EventBridge** | Managed scheduler with retries | Can invoke only the report Lambda | Not applicable | Free |
+| **CloudFront** | Served from many edge locations | HTTPS only; origin access control keeps the bucket private; security headers on every file | Cached close to the user, including South African edge locations | 1 TB and 10 million requests free |
 | **CloudWatch** | Alarms detect failure early | Logs carry identifiers, never personal details | Logs Insights queries on JSON fields | Within 10 metrics and 10 alarms |
 | **KMS** | Key managed and backed up by AWS | Customer-managed key, key policy, rotation enabled | Transparent | About $1 per month |
 | **VPC endpoints (gateway)** | Not a single point of failure | Traffic to S3 and DynamoDB stays on the AWS network | No NAT hop | Free, replaces a $32 per month NAT Gateway |
