@@ -6,7 +6,12 @@
       "Metric": {
         "Namespace": "AWS/Lambda",
         "MetricName": "Errors",
-        "Dimensions": [{"Name": "FunctionName", "Value": "__PREFIX__-ingest"}]
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": "__PREFIX__-ingest"
+          }
+        ]
       },
       "Period": 300,
       "Stat": "Sum"
@@ -19,7 +24,12 @@
       "Metric": {
         "Namespace": "AWS/Lambda",
         "MetricName": "Errors",
-        "Dimensions": [{"Name": "FunctionName", "Value": "__PREFIX__-score"}]
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": "__PREFIX__-score"
+          }
+        ]
       },
       "Period": 300,
       "Stat": "Sum"
@@ -32,7 +42,12 @@
       "Metric": {
         "Namespace": "AWS/Lambda",
         "MetricName": "Errors",
-        "Dimensions": [{"Name": "FunctionName", "Value": "__PREFIX__-alert"}]
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": "__PREFIX__-alert"
+          }
+        ]
       },
       "Period": 300,
       "Stat": "Sum"
@@ -45,7 +60,30 @@
       "Metric": {
         "Namespace": "AWS/Lambda",
         "MetricName": "Errors",
-        "Dimensions": [{"Name": "FunctionName", "Value": "__PREFIX__-query"}]
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": "__PREFIX__-query"
+          }
+        ]
+      },
+      "Period": 300,
+      "Stat": "Sum"
+    }
+  },
+  {
+    "Id": "report",
+    "ReturnData": false,
+    "MetricStat": {
+      "Metric": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": "__PREFIX__-report"
+          }
+        ]
       },
       "Period": 300,
       "Stat": "Sum"
@@ -55,6 +93,6 @@
     "Id": "errors",
     "Label": "Lambda errors (all functions)",
     "ReturnData": true,
-    "Expression": "FILL(ingest, 0) + FILL(score, 0) + FILL(alert, 0) + FILL(query, 0)"
+    "Expression": "FILL(ingest, 0) + FILL(score, 0) + FILL(alert, 0) + FILL(query, 0) + FILL(report, 0)"
   }
 ]

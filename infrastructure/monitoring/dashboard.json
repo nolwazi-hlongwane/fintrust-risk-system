@@ -337,6 +337,15 @@
           ],
           [
             "AWS/Lambda",
+            "Invocations",
+            "FunctionName",
+            "__PREFIX__-report",
+            {
+              "label": "report invocations"
+            }
+          ],
+          [
+            "AWS/Lambda",
             "Errors",
             "FunctionName",
             "__PREFIX__-ingest",
@@ -369,6 +378,15 @@
             "__PREFIX__-query",
             {
               "label": "query errors"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Errors",
+            "FunctionName",
+            "__PREFIX__-report",
+            {
+              "label": "report errors"
             }
           ]
         ]
@@ -422,6 +440,15 @@
             "__PREFIX__-query",
             {
               "label": "query"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Duration",
+            "FunctionName",
+            "__PREFIX__-report",
+            {
+              "label": "report"
             }
           ]
         ]
@@ -567,10 +594,10 @@
       "width": 24,
       "height": 6,
       "properties": {
-        "title": "Latest errors and warnings from all four functions",
+        "title": "Latest errors and warnings from all five functions",
         "region": "__REGION__",
         "view": "table",
-        "query": "SOURCE '/aws/lambda/__PREFIX__-ingest' | SOURCE '/aws/lambda/__PREFIX__-score' | SOURCE '/aws/lambda/__PREFIX__-alert' | SOURCE '/aws/lambda/__PREFIX__-query' | fields @timestamp, service, level, message, transaction_id, source_key, error | filter level in ['ERROR', 'WARNING'] | sort @timestamp desc | limit 25"
+        "query": "SOURCE '/aws/lambda/__PREFIX__-ingest' | SOURCE '/aws/lambda/__PREFIX__-score' | SOURCE '/aws/lambda/__PREFIX__-alert' | SOURCE '/aws/lambda/__PREFIX__-query' | SOURCE '/aws/lambda/__PREFIX__-report' | fields @timestamp, service, level, message, transaction_id, source_key, error | filter level in ['ERROR', 'WARNING'] | sort @timestamp desc | limit 25"
       }
     }
   ]

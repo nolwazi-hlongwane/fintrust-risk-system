@@ -54,7 +54,8 @@
       "ingest",
       "score",
       "alert",
-      "query"
+      "query",
+      "report"
     ],
     "query": "fields @timestamp, service, level, message, attempt, risk_score, error\n| filter transaction_id = \"PASTE-TRANSACTION-ID-HERE\"\n| sort @timestamp asc"
   },
@@ -64,8 +65,16 @@
       "ingest",
       "score",
       "alert",
-      "query"
+      "query",
+      "report"
     ],
     "query": "fields @timestamp, service, message, transaction_id, source_key, error\n| filter level = \"ERROR\"\n| sort @timestamp desc\n| limit 100"
+  },
+  {
+    "name": "10 Monthly reports written and failed",
+    "functions": [
+      "report"
+    ],
+    "query": "fields @timestamp, level, message, month, transactions, accounts, high_risk_accounts, json_key, error\n| filter message in [\"report_written\", \"report_failed\", \"control_totals_disagree\"]\n| sort @timestamp desc\n| limit 50"
   }
 ]

@@ -56,9 +56,16 @@ case "$FN" in
     IN_VPC="no"          # needs SES (no free VPC endpoint) and never touches RDS
     DESCRIPTION="FinTrust alerts: email compliance when a transaction is scored HIGH"
     ;;
+  report)
+    HANDLER="fintrust.report.handler"
+    TIMEOUT=60
+    MEMORY=256
+    IN_VPC="yes"         # needs the database; reaches S3 through the gateway endpoint
+    DESCRIPTION="FinTrust reporting: monthly CSV and JSON report to the reports bucket"
+    ;;
   *)
     echo "Usage: $0 <function>" >&2
-    echo "Functions available so far: ingest, score, query, alert" >&2
+    echo "Functions: ingest, score, query, alert, report" >&2
     exit 1
     ;;
 esac
@@ -73,6 +80,11 @@ rm -rf "$BUILD" "$ZIP"
 mkdir -p "$BUILD"
 cp -R "$ROOT/fintrust" "$BUILD/fintrust"
 find "$BUILD" -name "__pycache__" -type d -prune -exec rm -rf {} +
+if [[ "$FN" == "report" ]]; then
+  # The report runs the project's own SQL files, so they travel with the code.
+  mkdir -p "$BUILD/fintrust/sql"
+  cp "$ROOT/sql/monthly_summary.sql" "$ROOT/sql/risk_report.sql" "$BUILD/fintrust/sql/"
+fi
 # boto3 is already provided by the Lambda Python runtime, so it is not packaged.
 if [[ "$IN_VPC" == "yes" ]]; then
   # psycopg2 contains compiled code, so the copy installed on a Mac will not run

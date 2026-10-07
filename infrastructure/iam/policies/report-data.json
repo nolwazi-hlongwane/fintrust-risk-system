@@ -4,8 +4,26 @@
     {
       "Sid": "DatabaseLoginAsReportUserOnly",
       "Effect": "Allow",
-      "Action": ["rds-db:connect"],
+      "Action": [
+        "rds-db:connect"
+      ],
       "Resource": "arn:aws:rds-db:__REGION__:__ACCOUNT_ID__:dbuser:__DBI_RESOURCE_ID__/fintrust_report"
+    },
+    {
+      "Sid": "WriteMonthlyReportsOnly",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::__PREFIX__-reports-__ACCOUNT_ID__/monthly/*"
+    },
+    {
+      "Sid": "EncryptReports",
+      "Effect": "Allow",
+      "Action": [
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "__KMS_KEY_ARN__"
     }
   ]
 }
