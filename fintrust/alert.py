@@ -32,7 +32,7 @@ import boto3
 from boto3.dynamodb.types import TypeDeserializer
 from botocore.exceptions import BotoCoreError, ClientError
 
-from fintrust import config, dynamo
+from fintrust import config, dynamo, metrics
 from fintrust.log import get_logger
 from fintrust.validators import mask_account
 
@@ -174,6 +174,7 @@ def handler(event, context):
             log.error("alert_record_failed", error_type=type(error).__name__, error=str(error))
 
     log.info("batch_finished", received=len(event.get("Records", [])), failed=failures, **counts)
+    metrics.emit(AlertsSent=counts["sent"], AlertFailures=failures)
     if failures:
         # Raising makes the stream retry the batch. Alerts already sent are
         # skipped on the retry because of their markers.

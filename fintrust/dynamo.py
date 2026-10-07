@@ -7,7 +7,7 @@ Table design (one table, two kinds of item):
                                   the transaction id, then the kind of record:
 
         2026-09-15T13:10:00Z#TXN-20260915-000231#SCORE
-        2026-09-15T13:10:00Z#TXN-20260915-000231#EVENT#2026-10-06T09:00:01.120Z#QUEUED
+        2026-09-15T13:10:00Z#TXN-20260915-000231#EVENT#2026-10-06T09:00:01.120417Z#QUEUED
 
 Why the sort key is built like this:
   * It starts with the timestamp, so one account's items are stored in time
@@ -77,7 +77,10 @@ def _expires_at():
 
 
 def _now_text():
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    # Microseconds, because this time is part of an event's sort key: two events
+    # of the same stage written within one millisecond would otherwise share a
+    # key, and the second would silently replace the first.
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def score_key(tx_timestamp, transaction_id):
