@@ -537,3 +537,76 @@ Tests were written with every module from Week 13 Day 1 onwards, so this phase c
 | Rubric C4: end-to-end run against the real system | Four verify scripts so far; the single `e2e_test.py` is Week 14 Day 5 |
 
 **Open items carried forward:** tests for `report.py` and the SQL analytics files (Week 14 Day 4, written with the code); `scripts/e2e_test.py` and the real-account dead-letter run (Week 14 Day 5).
+
+---
+
+## Week 14 Day 4 (part 1): SQL Analytics and Reporting Layer
+
+**Built on:** Wednesday 7 October 2026 (brief slot: Week 14 Day 4, Thursday 8 October 2026)
+**Branch:** `feature/w14d4-sql-analytics-report`
+
+This phase is delivered in two parts. Part 1 is everything the brief lists for the day. Part 2 is the web dashboard.
+
+### What was built
+
+| Item | Where |
+|---|---|
+| Running balance per account (window function) | `sql/monthly_summary.sql` |
+| High-risk account report: CTEs, rolling 30-day window, `PERCENT_RANK` fraud ranking | `sql/risk_report.sql` |
+| Compliance views `v_risk_dashboard` and `v_open_alerts` | `sql/views.sql` |
+| Report Lambda: monthly JSON and CSV to the reports bucket | `fintrust/report.py` |
+| EventBridge schedule, 06:00 SAST on the 1st of each month | `infrastructure/eventbridge/deploy_schedule.sh` |
+| Report role: write under `monthly/` in the reports bucket only | `infrastructure/iam/policies/report-data.json` |
+| Report Lambda added to the Lambda errors alarm, the dashboard and a tenth saved query | `infrastructure/monitoring/` |
+| Explanation of the SQL, with the running balance verified by hand | `docs/sql-analytics.md` |
+| Live verification | `scripts/verify_report.py` |
+
+This completes the brief's six SQL artefacts and the tenth Python module.
+
+### Key decisions
+
+1. **The report Lambda runs the SQL files; it does not copy them.** `report.py` loads `monthly_summary.sql` and `risk_report.sql` (packaged with the function) and reads `v_open_alerts`. The monthly report, the SQL artefacts and an analyst's own query can never give different answers.
+2. **"Rolling 30 days" is a sliding window, not a calendar month.** `RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW` counts back from every high-risk transaction, so a burst across a month boundary is caught.
+3. **`PERCENT_RANK` is calculated over all accounts before filtering.** A percentile only means something against the whole population.
+4. **The running balance is proved three ways.** By hand for eight rows (in the documentation and as a test), by recalculating all 275 rows in plain Python, and by control totals inside every report.
+5. **Views count in separate subqueries.** Joining transactions, alerts and risk events directly would multiply rows and inflate the counts.
+6. **The report user lost access to `customers`.** The report needs account ids, not names. `fintrust_report` now reads four tables and two views, none with contact details.
+7. **A scheduled run uses the event's time, not "now".** If EventBridge's invocation is retried later, it still reports on the same month.
+8. **Re-running a month replaces its files.** The bucket is versioned, so earlier versions are kept.
+9. **Months are South African calendar months.** A transaction at 00:30 on 1 October SAST belongs to October, although it is still September in UTC.
+
+### Test results
+
+- `pytest`: 810 tests (640 unit, 170 integration). 809 pass locally and 1 is skipped locally (it needs the CI database's password login).
+- Coverage of `fintrust/`: 99% with the whole suite (2 lines of 1,324 not run), 96% with unit tests alone. `report.py` is 100% covered.
+- The risk report is compared with a brute-force check of every 30-day window, and its boundaries are tested: 3 is not reported, a 4th exactly 30 days after the 1st is, a 4th 31 days after is not.
+- All deployment scripts were run against a local AWS simulator. `verify_report.py` passed 24 of 24 there, with the real report handler running against a real PostgreSQL. The simulator cannot execute a Lambda, so the function running inside the VPC and writing to S3 through the gateway endpoint is first proven on the real account.
+
+### Evidence to capture (save in `docs/evidence/`)
+
+- [ ] `w14d4-verify-report.png`: terminal output of `python scripts/verify_report.py` ending in "24 of 24 checks passed"
+- [ ] `w14d4-risk-report-sql.png`: terminal, `python scripts/run_sql.py sql/risk_report.sql`
+- [ ] `w14d4-running-balance-sql.png`: terminal, the running balance query for `ACC-1001` (the eight hand-verified rows)
+- [ ] `w14d4-view-risk-dashboard.png`: terminal, a query on `v_risk_dashboard`
+- [ ] `w14d4-s3-reports.png`: S3 console, reports bucket, `monthly/2026-09/`, showing the JSON and CSV files (a required screenshot in the brief)
+- [ ] `w14d4-report-csv.png`: the September CSV opened (terminal or spreadsheet)
+- [ ] `w14d4-eventbridge-rule.png`: EventBridge console, Rules, `fintrust-capstone-monthly-report`, showing the cron schedule and the Lambda target
+- [ ] `w14d4-lambda-functions.png`: Lambda console, the function list showing all five functions (retakes the Week 13 Day 5 screenshot)
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| CTE-based risk report: more than 3 high-risk transactions in any rolling 30-day window | Met |
+| `PERCENT_RANK` fraud ranking | Met |
+| Running balance: `SUM() OVER (PARTITION BY account_id ORDER BY tx_date ROWS UNBOUNDED PRECEDING)` | Met, with `transaction_id` added as a tie-breaker |
+| `views.sql`: at least one view, usable without knowing the schema | Met (two views) |
+| `report.py` generating monthly CSV and JSON to S3 | Met |
+| Triggered by EventBridge cron | Met |
+| Rubric C2: all six SQL artefacts | Met |
+| Rubric C2: running balance hand-verified | Met (`docs/sql-analytics.md`) |
+| Rubric C2: ERD matches the deployed schema exactly | Met (a test compares them; views are listed separately) |
+| Rubric C3: all ten modules present | Met |
+| Rubric C1: every Lambda role least-privilege | Met for all five |
+
+**Open items carried forward:** the web dashboard, CloudFront hosting and tightening CORS (Week 14 Day 4 part 2); end-to-end script, dead-letter run on the real account, Well-Architected review and final audit (Week 14 Day 5).

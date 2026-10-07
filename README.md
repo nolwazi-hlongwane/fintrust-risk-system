@@ -47,7 +47,8 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 | [Security plan and IAM role matrix](docs/security-plan.md) | Who and what can access which resource |
 | [Data management design](docs/data-governance.md) | POPIA, data quality, retention, migration, risk register |
 | [ERD](docs/erd.md) | Database tables and relationships |
-| [SQL](sql/) | `schema.sql`, `functions.sql`, `db_users.sql`, `seed.sql` |
+| [SQL](sql/) | `schema.sql`, `functions.sql`, `views.sql`, `db_users.sql`, `seed.sql`, `risk_report.sql`, `monthly_summary.sql` |
+| [SQL analytics and the monthly report](docs/sql-analytics.md) | The window function, CTE report and views explained, with the running balance checked by hand |
 | [Testing and CI/CD](docs/testing.md) | The three test layers, fixtures, what each file covers, the CI pipeline |
 | [Monitoring](docs/monitoring.md) | Metrics, alarms and what to do when one fires, dashboard, tracing |
 | [Logs Insights queries](docs/logs-insights-queries.md) | Ready-made queries for the structured logs |
@@ -91,7 +92,7 @@ docker compose down
 
 Without a database those tests are skipped, not failed.
 
-There are 738 tests (601 unit, 137 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
+There are 810 tests (640 unit, 170 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
 
 ## Deploy to AWS
 
@@ -134,7 +135,7 @@ The database has no public address. To load the schema, open the private tunnel 
 Then, back in the first window:
 
 ```bash
-python scripts/run_sql.py sql/schema.sql sql/functions.sql sql/db_users.sql sql/seed.sql
+python scripts/run_sql.py sql/schema.sql sql/functions.sql sql/views.sql sql/db_users.sql sql/seed.sql
 python scripts/run_sql.py -c "SELECT risk_level, count(*) FROM transactions GROUP BY 1 ORDER BY 1"
 ```
 
@@ -239,6 +240,28 @@ python scripts/verify_monitoring.py                      # real traffic, then ch
 `deploy_monitoring.sh` sends a subscription email: click **Confirm subscription** in it before running the verifier. The database must be running for the verifier.
 
 If the `transactions-dlq-depth` alarm fires, fix the cause and then move the waiting messages back with `./scripts/redrive_dlq.sh`.
+
+### Step 8: SQL analytics and the monthly report (Week 14 Day 4)
+
+The database must be running and the tunnel open in a second terminal window.
+
+```bash
+python scripts/run_sql.py sql/views.sql sql/db_users.sql   # the two views and the right to read them
+python scripts/run_sql.py sql/risk_report.sql              # see the high-risk account report
+./infrastructure/iam/apply_data_policies.sh                # report role: write to the reports bucket
+./infrastructure/lambda/deploy_function.sh report          # the report Lambda
+./infrastructure/eventbridge/deploy_schedule.sh            # run it at 06:00 on the 1st of each month
+./infrastructure/monitoring/deploy_monitoring.sh           # add the report Lambda to the alarm and dashboard
+python scripts/verify_report.py                            # produce real reports and check the numbers
+```
+
+To produce and read a report yourself:
+
+```bash
+aws lambda invoke --function-name fintrust-capstone-report --cli-binary-format raw-in-base64-out \
+    --payload '{"month": "2026-09"}' /dev/stdout
+aws s3 ls s3://fintrust-capstone-reports-$(aws sts get-caller-identity --query Account --output text)/monthly/ --recursive
+```
 
 ## Sample data
 

@@ -30,12 +30,12 @@ NAMESPACE = "FinTrust/ETL"
 DIMENSIONS = [{"Name": "Environment", "Value": "dev"}]
 TOPIC_NAME = f"{PREFIX}-ops-alarms"
 DASHBOARD_NAME = f"{PREFIX}-operations"
-FUNCTIONS = ("ingest", "score", "alert", "query")
+FUNCTIONS = ("ingest", "score", "alert", "query", "report")
 ALARMS = (
     "scoring-error-rate", "high-risk-count", "transactions-dlq-depth", "ingest-dlq-depth",
     "alert-dlq-depth", "lambda-errors", "api-5xx-errors",
 )
-SAVED_QUERIES = 9
+SAVED_QUERIES = 10
 WAIT_SECONDS = 420
 
 cloudwatch = session.client("cloudwatch")
@@ -125,7 +125,7 @@ def verify_tracing_and_logs():
     print("\nX-Ray tracing and log retention")
     modes = {f: lambda_client.get_function_configuration(FunctionName=f"{PREFIX}-{f}")["TracingConfig"]["Mode"]
              for f in FUNCTIONS}
-    check("X-Ray active tracing is on for all four Lambda functions", set(modes.values()) == {"Active"}, str(modes))
+    check("X-Ray active tracing is on for all five Lambda functions", set(modes.values()) == {"Active"}, str(modes))
     api_id = next(a["id"] for a in apigateway.get_rest_apis(limit=500)["items"] if a["name"] == f"{PREFIX}-api")
     stage = apigateway.get_stage(restApiId=api_id, stageName="dev")
     check("X-Ray tracing is on for the API stage", stage.get("tracingEnabled") is True)

@@ -192,14 +192,14 @@ class TestAlertsAndResolve:
 
 
 def test_schema_functions_and_users_can_be_dropped_and_rebuilt(admin):
-    """drop_all.sql followed by the four files in order must work on a database
+    """drop_all.sql followed by the five files in order must work on a database
     that already has everything (this is the documented reset procedure)."""
     from tests.conftest import SQL_DIR
 
     with admin.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM transactions WHERE transaction_id NOT LIKE 'TXN-TEST-%'")
         before = cursor.fetchone()[0]
-        for name in ("drop_all.sql", "schema.sql", "functions.sql", "db_users.sql", "seed.sql"):
+        for name in ("drop_all.sql", "schema.sql", "functions.sql", "views.sql", "db_users.sql", "seed.sql"):
             cursor.execute((SQL_DIR / name).read_text())
         cursor.execute("SELECT count(*) FROM transactions")
         assert cursor.fetchone()[0] == before == 275

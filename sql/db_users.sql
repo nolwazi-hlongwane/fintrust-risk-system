@@ -2,7 +2,7 @@
 -- FinTrust: database users, one per Lambda that connects to PostgreSQL
 -- Brief slot: Week 13 Day 2 (Data Layer)
 --
--- Run after schema.sql and functions.sql:   psql -f sql/db_users.sql
+-- Run after schema.sql, functions.sql and views.sql:   psql -f sql/db_users.sql
 -- Safe to run more than once.
 --
 -- Least privilege inside the database, as a second layer behind IAM:
@@ -54,7 +54,12 @@ GRANT UPDATE (status, resolved_at, resolved_by, resolution_note) ON alerts TO fi
 -- it may only call the flag_account function (see functions.sql).
 GRANT EXECUTE ON FUNCTION flag_account(VARCHAR, VARCHAR) TO fintrust_query;
 
--- report Lambda: read only.
-GRANT SELECT ON customers, accounts, transactions, risk_events, alerts TO fintrust_report;
+-- report Lambda: read only. It is not given the customers table: the monthly
+-- report identifies accounts by id and never needs a name or contact detail.
+GRANT SELECT ON accounts, transactions, risk_events, alerts TO fintrust_report;
+
+-- Views for the compliance team (see views.sql). A view runs with the rights of
+-- its owner, so a user needs only SELECT on the view itself.
+GRANT SELECT ON v_risk_dashboard, v_open_alerts TO fintrust_query, fintrust_report;
 
 COMMIT;
