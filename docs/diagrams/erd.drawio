@@ -1,0 +1,160 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="ERD" id="erd">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" page="1" pageWidth="1470" pageHeight="540">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="FinTrust ledger: entity relationship diagram (third normal form)" style="text;html=1;align=left;fontSize=20;fontStyle=1;fontColor=#0f2e2a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="16" width="800" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="CUSTOMERS" value="customers" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;collapsible=0;fillColor=#1565c0;fontColor=#ffffff;strokeColor=#1565c0;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="250" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="CUSTOMERS-customer_id" value="customer_id : varchar (PK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontStyle=1;fontSize=12;fontColor=#17211f;" vertex="1" parent="CUSTOMERS">
+          <mxGeometry x="0" y="30" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="CUSTOMERS-full_name" value="full_name : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="CUSTOMERS">
+          <mxGeometry x="0" y="52" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="CUSTOMERS-email" value="email : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="CUSTOMERS">
+          <mxGeometry x="0" y="74" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="CUSTOMERS-phone_number" value="phone_number : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="CUSTOMERS">
+          <mxGeometry x="0" y="96" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="CUSTOMERS-created_at" value="created_at : timestamptz" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="CUSTOMERS">
+          <mxGeometry x="0" y="118" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ACCOUNTS" value="accounts" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;collapsible=0;fillColor=#1565c0;fontColor=#ffffff;strokeColor=#1565c0;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="420" y="80" width="250" height="162" as="geometry"/>
+        </mxCell>
+        <mxCell id="ACCOUNTS-account_id" value="account_id : varchar (PK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontStyle=1;fontSize=12;fontColor=#17211f;" vertex="1" parent="ACCOUNTS">
+          <mxGeometry x="0" y="30" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ACCOUNTS-customer_id" value="customer_id : varchar (FK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ACCOUNTS">
+          <mxGeometry x="0" y="52" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ACCOUNTS-account_type" value="account_type : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ACCOUNTS">
+          <mxGeometry x="0" y="74" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ACCOUNTS-status" value="status : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ACCOUNTS">
+          <mxGeometry x="0" y="96" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ACCOUNTS-opened_date" value="opened_date : date" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ACCOUNTS">
+          <mxGeometry x="0" y="118" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ACCOUNTS-created_at" value="created_at : timestamptz" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ACCOUNTS">
+          <mxGeometry x="0" y="140" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS" value="transactions" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;collapsible=0;fillColor=#1565c0;fontColor=#ffffff;strokeColor=#1565c0;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="800" y="80" width="250" height="338" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-transaction_id" value="transaction_id : varchar (PK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontStyle=1;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="30" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-account_id" value="account_id : varchar (FK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="52" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-tx_date" value="tx_date : timestamptz" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="74" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-amount" value="amount : numeric" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="96" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-currency" value="currency : char" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="118" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-tx_type" value="tx_type : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="140" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-channel" value="channel : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="162" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-merchant_name" value="merchant_name : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="184" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-country_code" value="country_code : char" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="206" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-description" value="description : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="228" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-risk_score" value="risk_score : smallint" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="250" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-risk_level" value="risk_level : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="272" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-source_file" value="source_file : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="294" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="TRANSACTIONS-created_at" value="created_at : timestamptz" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="TRANSACTIONS">
+          <mxGeometry x="0" y="316" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="RISK_EVENTS" value="risk_events" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;collapsible=0;fillColor=#1565c0;fontColor=#ffffff;strokeColor=#1565c0;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="420" y="350" width="250" height="184" as="geometry"/>
+        </mxCell>
+        <mxCell id="RISK_EVENTS-risk_event_id" value="risk_event_id : bigint (PK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontStyle=1;fontSize=12;fontColor=#17211f;" vertex="1" parent="RISK_EVENTS">
+          <mxGeometry x="0" y="30" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="RISK_EVENTS-account_id" value="account_id : varchar (FK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="RISK_EVENTS">
+          <mxGeometry x="0" y="52" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="RISK_EVENTS-transaction_id" value="transaction_id : varchar (FK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="RISK_EVENTS">
+          <mxGeometry x="0" y="74" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="RISK_EVENTS-event_type" value="event_type : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="RISK_EVENTS">
+          <mxGeometry x="0" y="96" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="RISK_EVENTS-points" value="points : smallint" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="RISK_EVENTS">
+          <mxGeometry x="0" y="118" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="RISK_EVENTS-reason" value="reason : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="RISK_EVENTS">
+          <mxGeometry x="0" y="140" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="RISK_EVENTS-created_at" value="created_at : timestamptz" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="RISK_EVENTS">
+          <mxGeometry x="0" y="162" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ALERTS" value="alerts" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;collapsible=0;fillColor=#1565c0;fontColor=#ffffff;strokeColor=#1565c0;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="80" width="250" height="184" as="geometry"/>
+        </mxCell>
+        <mxCell id="ALERTS-alert_id" value="alert_id : bigint (PK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontStyle=1;fontSize=12;fontColor=#17211f;" vertex="1" parent="ALERTS">
+          <mxGeometry x="0" y="30" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ALERTS-transaction_id" value="transaction_id : varchar (FK)" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ALERTS">
+          <mxGeometry x="0" y="52" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ALERTS-status" value="status : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ALERTS">
+          <mxGeometry x="0" y="74" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ALERTS-created_at" value="created_at : timestamptz" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ALERTS">
+          <mxGeometry x="0" y="96" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ALERTS-resolved_at" value="resolved_at : timestamptz" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ALERTS">
+          <mxGeometry x="0" y="118" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ALERTS-resolved_by" value="resolved_by : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ALERTS">
+          <mxGeometry x="0" y="140" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="ALERTS-resolution_note" value="resolution_note : varchar" style="text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;fontSize=12;fontColor=#17211f;" vertex="1" parent="ALERTS">
+          <mxGeometry x="0" y="162" width="250" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel-0" value="owns" style="edgeStyle=entityRelationEdgeStyle;html=1;startArrow=ERmandOne;endArrow=ERzeroToMany;strokeColor=#374151;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="CUSTOMERS" target="ACCOUNTS">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel-1" value="has" style="edgeStyle=entityRelationEdgeStyle;html=1;startArrow=ERmandOne;endArrow=ERzeroToMany;strokeColor=#374151;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ACCOUNTS" target="TRANSACTIONS">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel-2" value="is flagged by" style="edgeStyle=entityRelationEdgeStyle;html=1;startArrow=ERmandOne;endArrow=ERzeroToMany;strokeColor=#374151;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ACCOUNTS" target="RISK_EVENTS">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel-3" value="triggers" style="edgeStyle=entityRelationEdgeStyle;html=1;startArrow=ERmandOne;endArrow=ERzeroToMany;strokeColor=#374151;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="TRANSACTIONS" target="RISK_EVENTS">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rel-4" value="raises" style="edgeStyle=entityRelationEdgeStyle;html=1;startArrow=ERmandOne;endArrow=ERzeroToOne;strokeColor=#374151;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="TRANSACTIONS" target="ALERTS">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

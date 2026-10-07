@@ -11,9 +11,9 @@ Every change is checked automatically before it can reach the `develop` or `main
 
 | Layer | What it runs against | When | Tests | What it proves |
 |---|---|---|---|---|
-| **Unit** (`tests/unit`) | moto (a simulated AWS, in memory) | Every push, any branch | 684 | Each module does its own job: validation rules, scoring rules, error handling, email content, API responses, IAM policies |
-| **Integration** (`tests/integration`) | moto and a real PostgreSQL 16 | `develop` branch only | 177 | The modules work together and the SQL is right: constraints, rollback, permissions per database user, and the whole pipeline end to end |
-| **Live verification** (`scripts/verify_*.py`) | The real AWS account | By hand, after each deployment | 7 scripts | The deployed system works: real IAM, real network, real email |
+| **Unit** (`tests/unit`) | moto (a simulated AWS, in memory) | Every push, any branch | 709 | Each module does its own job: validation rules, scoring rules, error handling, email content, API responses, IAM policies |
+| **Integration** (`tests/integration`) | moto and a real PostgreSQL 16 | `develop` branch only | 180 | The modules work together and the SQL is right: constraints, rollback, permissions per database user, and the whole pipeline end to end |
+| **Live verification** (`scripts/verify_*.py`, `scripts/e2e_test.py`) | The real AWS account | By hand, after each deployment | 8 scripts | The deployed system works: real IAM, real network, real email |
 
 Coverage of the application code (`fintrust/`) is 99% with all tests, 96% with unit tests alone.
 
@@ -59,6 +59,7 @@ A fixture is setup code that pytest runs for any test that asks for it by name.
 | `unit/test_iam_policies.py` | 97 | No wildcard actions; every role limited to its own resources |
 | `unit/test_storage_config.py`, `test_monitoring_config.py` | 45 | Lifecycle rules match the retention policy; alarms and dashboard use real metric names; Free Tier limits |
 | `unit/test_frontend.py` | 23 | The dashboard's files: no key or mock data, no HTML built from data, strict Content-Security-Policy, private hosting |
+| `unit/test_demo_tools.py` | 25 | The demonstration file scores exactly as the end-to-end test expects; onboarding is safe; the diagrams match their source |
 | `unit/test_repo_hygiene.py` | 22 | No keys or passwords committed; dependencies pinned; clients at module level; scripts valid |
 | `integration/test_schema.py` | 46 | Every constraint, index and foreign key rejects bad data |
 | `integration/test_erd_matches_schema.py` | 7 | The ERD document matches the deployed tables exactly |
@@ -67,6 +68,7 @@ A fixture is setup code that pytest runs for any test that asks for it by name.
 | `integration/test_query_integration.py`, `test_write_api_integration.py` | 54 | API SQL against seed data; `flag_account`; database permissions |
 | `integration/test_sql_analytics.py` | 24 | Running balance and risk report checked against plain-Python recalculation; window boundaries; views; permissions |
 | `integration/test_report_integration.py` | 9 | The report Lambda end to end on seed data: totals, balances chaining month to month, no customer details |
+| `integration/test_onboard_integration.py` | 3 | Onboarding an account against a real database |
 | `integration/test_pipeline.py` | 7 | The whole pipeline in one process, including the dead-letter queue |
 
 ### The pipeline test and the dead-letter queue
@@ -80,7 +82,17 @@ The dead-letter tests prove four things:
 3. After the account is onboarded and the queue is redriven, the transaction is scored.
 4. Two messages for the failing account keep their order.
 
-The same scenario is run on the real account in Week 14 Day 5.
+The same scenario is run on the real account by the end-to-end test.
+
+## The end-to-end test (`scripts/e2e_test.py`)
+
+One script, run against the real deployed system. It uploads a new 12-row file through the public API and checks every stage: the raw bucket, the processed and quarantine buckets, the ledger, the event store, the alert email, the API, the monthly report, and finally failure and recovery through the dead-letter queue. It makes 30 checks and takes about 9 minutes, most of it waiting for the three retries and for the queue's 5-minute duplicate window.
+
+```bash
+python scripts/e2e_test.py | tee docs/evidence/w14d5-e2e-output.txt
+```
+
+The file it sends is built by `scripts/make_demo_file.py`, the same file used for the live demonstration, and a unit test checks that every row scores exactly what the end-to-end test expects.
 
 ## Continuous integration (`.github/workflows/ci.yml`)
 

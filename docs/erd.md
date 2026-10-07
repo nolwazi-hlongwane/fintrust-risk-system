@@ -1,7 +1,9 @@
 # Entity Relationship Diagram
 
 **Brief slot:** Week 13 Day 1: Design Kickoff (draft); confirmed in Week 13 Day 2: Data Layer.
-**Status:** matches `sql/schema.sql` exactly. This is checked automatically: `tests/integration/test_erd_matches_schema.py` reads the tables, columns, types and keys from a real PostgreSQL database and fails the build if this diagram differs. The PDF export is added to `docs/diagrams/` with the final diagrams in Week 14 Day 5.
+**Status:** matches `sql/schema.sql` exactly. This is checked automatically: `tests/integration/test_erd_matches_schema.py` reads the tables, columns, types and keys from a real PostgreSQL database and fails the build if this diagram differs. The diagram deliverable is [diagrams/erd.pdf](diagrams/erd.pdf), with an editable draw.io source in [diagrams/erd.drawio](diagrams/erd.drawio); both are generated from the diagram source below, so they match it.
+
+![FinTrust ERD](diagrams/erd.svg)
 
 ```mermaid
 erDiagram

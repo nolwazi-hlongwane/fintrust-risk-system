@@ -20,6 +20,10 @@ If any step fails, nothing is lost: the transaction waits in a holding area unti
 
 It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is designed to cost nothing beyond the AWS Free Tier.
 
+![Architecture: a file flows from S3 through validation, a queue and scoring into the ledger, with alerts by email and a dashboard on top](docs/diagrams/architecture.svg)
+
+The same diagram as a PDF: [docs/diagrams/architecture.pdf](docs/diagrams/architecture.pdf).
+
 ## Project status
 
 | Brief slot | Phase | Status |
@@ -33,7 +37,7 @@ It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is 
 | Week 14 Day 2 | CloudWatch Monitoring and Observability | Done |
 | Week 14 Day 3 | Automated Testing | Done |
 | Week 14 Day 4 | SQL Analytics and Reporting Layer, and the web dashboard | Done |
-| Week 14 Day 5 | End-to-End Integration and Submission | Next |
+| Week 14 Day 5 | End-to-End Integration and Submission | Done |
 
 Progress and evidence for each phase are recorded in [docs/build-log.md](docs/build-log.md).
 
@@ -41,11 +45,16 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 
 | Document | What it covers |
 |---|---|
+| [Final audit against the brief and rubric](docs/rubric-audit.md) | Every requirement, and where the proof is. **Start here if you are assessing the project** |
+| [Architecture diagram (PDF)](docs/diagrams/architecture.pdf) and [ERD (PDF)](docs/diagrams/erd.pdf) | The two diagram deliverables, with editable draw.io sources beside them |
 | [Project execution plan](docs/project-execution-plan.md) | Scope, phases, decisions |
 | [Architecture](docs/architecture.md) | Diagram, data flow, why each AWS service was chosen |
 | [API design](docs/api-design.md) | Every route, request, response and error |
 | [Security plan and IAM role matrix](docs/security-plan.md) | Who and what can access which resource |
 | [Data management design](docs/data-governance.md) | POPIA, data quality, retention, migration, risk register |
+| [Data lifecycle and POPIA statement](docs/popia-lifecycle-statement.md) | The one-page summary: classification, retention tiers, access controls |
+| [Well-Architected review](docs/well-architected-review.md) | An honest self-assessment against the six pillars, with gaps and next steps |
+| [Demonstration runbook](docs/demo-runbook.md) | How the live demonstration is prepared and run |
 | [ERD](docs/erd.md) | Database tables and relationships |
 | [SQL](sql/) | `schema.sql`, `functions.sql`, `views.sql`, `db_users.sql`, `seed.sql`, `risk_report.sql`, `monthly_summary.sql` |
 | [SQL analytics and the monthly report](docs/sql-analytics.md) | The window function, CTE report and views explained, with the running balance checked by hand |
@@ -93,7 +102,7 @@ docker compose down
 
 Without a database those tests are skipped, not failed.
 
-There are 861 tests (684 unit, 177 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
+There are 889 tests (709 unit, 180 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
 
 ## Deploy to AWS
 
@@ -280,6 +289,41 @@ source ./scripts/api_env.sh && printf '%s' "$API_KEY" | pbcopy
 ```
 
 After changing a file in `frontend/`, run `deploy_frontend.sh` again.
+
+### Step 10: end-to-end test and nightly stop (Week 14 Day 5)
+
+The database must be running and the tunnel open in a second terminal window.
+
+```bash
+python scripts/e2e_test.py                               # the whole system, including fail-and-recover (about 9 minutes)
+./infrastructure/scheduler/deploy_nightly_stop.sh        # stop the database automatically at 20:00 every day
+```
+
+`python scripts/e2e_test.py --skip-dlq` is a 2-minute version that needs no tunnel.
+
+## Keeping the cost at zero
+
+The database is the only part that uses credits while idle. Stop it when you finish, and start it before you work or demonstrate:
+
+```bash
+./scripts/rds_stop.sh
+./scripts/rds_start.sh       # takes about 5 minutes
+```
+
+It is also stopped automatically at 20:00 South African time every day. Everything else (Lambda, API Gateway, queues, DynamoDB, S3, CloudFront) costs nothing when not in use.
+
+## Demonstrating the system
+
+```bash
+python scripts/make_demo_file.py      # writes a fresh 12-row file and prints what to expect
+```
+
+Upload the file on the dashboard and follow [docs/demo-runbook.md](docs/demo-runbook.md). One row is for an account that does not exist yet: it fails three times, waits in the dead-letter queue, and is recovered with:
+
+```bash
+python scripts/onboard_account.py ACC-9...     # the account id printed by make_demo_file.py
+./scripts/redrive_dlq.sh
+```
 
 ## Sample data
 
