@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Id": "fintrust-capstone-key-policy",
+  "Statement": [
+    {
+      "Sid": "LetIamPoliciesInThisAccountControlTheKey",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::__ACCOUNT_ID__:root"
+      },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "LetCloudWatchAlarmsPublishToTheEncryptedAlarmTopic",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudwatch.amazonaws.com"
+      },
+      "Action": [
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

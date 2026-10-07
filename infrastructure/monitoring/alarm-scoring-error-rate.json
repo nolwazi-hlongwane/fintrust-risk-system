@@ -1,0 +1,34 @@
+[
+  {
+    "Id": "failures",
+    "ReturnData": false,
+    "MetricStat": {
+      "Metric": {
+        "Namespace": "FinTrust/ETL",
+        "MetricName": "ScoringFailures",
+        "Dimensions": [{"Name": "Environment", "Value": "__ENV__"}]
+      },
+      "Period": 300,
+      "Stat": "Sum"
+    }
+  },
+  {
+    "Id": "scored",
+    "ReturnData": false,
+    "MetricStat": {
+      "Metric": {
+        "Namespace": "FinTrust/ETL",
+        "MetricName": "TransactionsScored",
+        "Dimensions": [{"Name": "Environment", "Value": "__ENV__"}]
+      },
+      "Period": 300,
+      "Stat": "Sum"
+    }
+  },
+  {
+    "Id": "error_rate",
+    "Label": "Scoring error rate (%)",
+    "ReturnData": true,
+    "Expression": "IF(failures + scored > 0, 100 * failures / (failures + scored), 0)"
+  }
+]
