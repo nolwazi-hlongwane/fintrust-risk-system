@@ -228,7 +228,7 @@ def postgres_database():
     database = _admin_connect(TEST_DB_NAME)
     database.autocommit = True
     with database.cursor() as cursor:
-        for name in ("schema.sql", "db_users.sql", "seed.sql"):
+        for name in ("schema.sql", "functions.sql", "db_users.sql", "seed.sql"):
             cursor.execute((SQL_DIR / name).read_text())
         for user in ("fintrust_score", "fintrust_query", "fintrust_report"):
             cursor.execute(f"ALTER ROLE {user} PASSWORD %s", (TEST_USER_PASSWORD,))

@@ -15,7 +15,7 @@ FUNCTIONS = ["ingest", "score", "alert", "query", "report"]
 
 # The only statements allowed to use Resource "*", because AWS does not support
 # naming a specific resource for these actions.
-RESOURCE_STAR_ALLOWED = {"XRayTracing", "VpcNetworkInterfaces", "LogsAndTracing"}
+RESOURCE_STAR_ALLOWED = {"XRayTracing", "VpcNetworkInterfaces", "LogsAndTracing", "ListTableStreams"}
 
 POLICY_FILES = sorted(POLICY_DIR.glob("*.json"))
 
@@ -114,6 +114,10 @@ def test_every_role_action_is_inside_the_permission_boundary(path):
 @pytest.mark.parametrize("path", sorted(POLICY_DIR.glob("*-data.json")), ids=lambda p: p.name)
 def test_data_policies_never_use_resource_star(path):
     for statement in statements(path):
+        if statement["Sid"] == "ListTableStreams":
+            # The one exception: dynamodb:ListStreams cannot be limited to a resource.
+            assert as_list(statement["Action"]) == ["dynamodb:ListStreams"]
+            continue
         for resource in as_list(statement["Resource"]):
             assert resource != "*"
             assert not resource.endswith(":*"), f"{path.name}: {resource} is too broad"
@@ -136,13 +140,13 @@ def test_non_vpc_functions_cannot_log_in_to_the_database(function):
             assert "rds-db:connect" not in as_list(statement["Action"])
 
 
-def test_only_ingest_and_score_can_write_to_dynamodb_so_far():
+def test_the_query_and_report_functions_cannot_write_to_dynamodb():
     writers = set()
     for path in ROLE_POLICY_FILES:
         for statement in statements(path):
             if {"dynamodb:PutItem", "dynamodb:UpdateItem"} & set(as_list(statement["Action"])):
                 writers.add(path.name.split("-")[0])
-    assert writers == {"ingest", "score"}
+    assert writers == {"ingest", "score", "alert"}
 
 
 def test_query_function_has_read_only_dynamodb_access():
@@ -217,3 +221,48 @@ def test_no_role_can_manage_the_key():
             for action in as_list(statement["Action"]):
                 if action.startswith("kms:"):
                     assert action in allowed, f"{path.name}: {action}"
+
+
+# ---- Week 14 Day 1: uploads and alerts ---------------------------------------
+
+def test_query_can_only_write_under_the_uploads_prefix_of_the_raw_bucket():
+    s3 = [s for s in statements(POLICY_DIR / "query-data.json") if any(a.startswith("s3:") for a in as_list(s["Action"]))]
+    assert len(s3) == 1
+    assert as_list(s3[0]["Action"]) == ["s3:PutObject"]
+    assert s3[0]["Resource"] == "arn:aws:s3:::__PREFIX__-raw-__ACCOUNT_ID__/uploads/*"
+
+
+def test_query_cannot_read_any_bucket_or_decrypt():
+    assert actions_on("query", ":s3:") == {"s3:PutObject"}
+    assert actions_on("query", "__KMS_KEY_ARN__") == {"kms:GenerateDataKey"}
+
+
+def test_only_the_alert_function_can_send_email():
+    senders = set()
+    for path in ROLE_POLICY_FILES:
+        for statement in statements(path):
+            if any(action.startswith("ses:") for action in as_list(statement["Action"])):
+                senders.add(path.name.split("-")[0])
+                assert as_list(statement["Action"]) == ["ses:SendEmail"]
+                assert [r.rsplit("/", 1)[1] for r in statement["Resource"]] == [
+                    "__ALERT_SENDER__", "__ALERT_RECIPIENT__"]
+    assert senders == {"alert"}
+
+
+def test_alert_function_reads_the_stream_but_cannot_query_or_change_scores():
+    table = actions_on("alert", "table/__PREFIX__-events")
+    assert table == {"dynamodb:GetRecords", "dynamodb:GetShardIterator", "dynamodb:DescribeStream",
+                     "dynamodb:GetItem", "dynamodb:PutItem"}
+
+
+def test_alert_function_has_no_database_bucket_or_transaction_queue_access():
+    for statement in statements(POLICY_DIR / "alert-data.json"):
+        for action in as_list(statement["Action"]):
+            assert not action.startswith(("rds-db:", "s3:"))
+    assert actions_on("alert", "transactions.fifo") == set()
+    assert actions_on("alert", "-alert-dlq") == {"sqs:SendMessage"}
+
+
+def test_no_email_address_is_stored_in_the_repository_policies():
+    for path in POLICY_FILES:
+        assert "@" not in path.read_text(), path.name
