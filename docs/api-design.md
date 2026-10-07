@@ -96,11 +96,11 @@ Read from the DynamoDB event store.
     ]
   },
   "events": [
-    { "stage": "RECEIVED", "at": "2026-09-15T07:42:15Z", "detail": "uploads/2026-09-15/batch.csv row 14" },
-    { "stage": "VALIDATED", "at": "2026-09-15T07:42:15Z" },
-    { "stage": "QUEUED", "at": "2026-09-15T07:42:16Z" },
-    { "stage": "SCORED", "at": "2026-09-15T07:42:18Z" },
-    { "stage": "ALERT_SENT", "at": "2026-09-15T07:42:20Z" }
+    { "stage": "RECEIVED", "at": "2026-09-15T07:42:15.120417Z", "detail": "uploads/2026-09-15/batch.csv row 14" },
+    { "stage": "VALIDATED", "at": "2026-09-15T07:42:15.120417Z" },
+    { "stage": "QUEUED", "at": "2026-09-15T07:42:16.120417Z" },
+    { "stage": "SCORED", "at": "2026-09-15T07:42:18.120417Z" },
+    { "stage": "ALERT_SENT", "at": "2026-09-15T07:42:20.120417Z" }
   ]
 }
 ```

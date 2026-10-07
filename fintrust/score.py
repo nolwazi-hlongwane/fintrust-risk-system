@@ -35,7 +35,7 @@ again. A redelivery can therefore never create a duplicate ledger row.
 import json
 from datetime import timedelta
 
-from fintrust import config, db, dynamo, rules
+from fintrust import config, db, dynamo, metrics, rules
 from fintrust.log import get_logger
 from fintrust.models import RiskScore, RuleHit, Transaction
 from fintrust.validators import mask_account
@@ -197,7 +197,7 @@ def process_record(record, log):
         rules=[hit.rule for hit in score.rules],
         created=created,
     )
-    return score
+    return score, created
 
 
 def handler(event, context):
@@ -206,6 +206,9 @@ def handler(event, context):
     failed_ids = []
     blocked_groups = set()      # accounts with a failed message earlier in this batch
     scored = 0
+    new_transactions = 0        # written to the ledger for the first time in this batch
+    new_high_risk = 0
+    failures = 0                # scoring attempts that raised an error
 
     for record in event.get("Records", []):
         message_id = record["messageId"]
@@ -215,14 +218,25 @@ def handler(event, context):
             failed_ids.append(message_id)       # keep this account's messages in order
             continue
         try:
-            process_record(record, log)
+            score, created = process_record(record, log)
             scored += 1
+            if created:
+                # A redelivered message that is already in the ledger is not counted again.
+                new_transactions += 1
+                new_high_risk += score.risk_level == "HIGH"
         except Exception:
             # Any failure, expected or not, must leave the message on the queue.
             # It was logged with its detail in process_record.
+            failures += 1
             failed_ids.append(message_id)
             if group is not None:
                 blocked_groups.add(group)
 
     log.info("batch_finished", received=len(event.get("Records", [])), scored=scored, failed=len(failed_ids))
+    # Messages held back only to keep an account's order are not failures themselves.
+    metrics.emit(
+        TransactionsScored=new_transactions,
+        HighRiskTransactions=new_high_risk,
+        ScoringFailures=failures,
+    )
     return {"batchItemFailures": [{"itemIdentifier": message_id} for message_id in failed_ids]}

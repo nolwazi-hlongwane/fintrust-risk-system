@@ -1,0 +1,60 @@
+[
+  {
+    "Id": "ingest",
+    "ReturnData": false,
+    "MetricStat": {
+      "Metric": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [{"Name": "FunctionName", "Value": "__PREFIX__-ingest"}]
+      },
+      "Period": 300,
+      "Stat": "Sum"
+    }
+  },
+  {
+    "Id": "score",
+    "ReturnData": false,
+    "MetricStat": {
+      "Metric": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [{"Name": "FunctionName", "Value": "__PREFIX__-score"}]
+      },
+      "Period": 300,
+      "Stat": "Sum"
+    }
+  },
+  {
+    "Id": "alert",
+    "ReturnData": false,
+    "MetricStat": {
+      "Metric": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [{"Name": "FunctionName", "Value": "__PREFIX__-alert"}]
+      },
+      "Period": 300,
+      "Stat": "Sum"
+    }
+  },
+  {
+    "Id": "query",
+    "ReturnData": false,
+    "MetricStat": {
+      "Metric": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [{"Name": "FunctionName", "Value": "__PREFIX__-query"}]
+      },
+      "Period": 300,
+      "Stat": "Sum"
+    }
+  },
+  {
+    "Id": "errors",
+    "Label": "Lambda errors (all functions)",
+    "ReturnData": true,
+    "Expression": "FILL(ingest, 0) + FILL(score, 0) + FILL(alert, 0) + FILL(query, 0)"
+  }
+]

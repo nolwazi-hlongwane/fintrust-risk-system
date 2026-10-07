@@ -88,10 +88,11 @@ So even if the report Lambda's code were compromised, both IAM and the database 
 | S3 buckets | SSE-KMS with the customer-managed key; bucket key enabled to reduce KMS calls | Bucket policy denies requests without TLS |
 | DynamoDB | Encrypted by default with an AWS owned key (no customer details are stored in this table) | HTTPS |
 | SQS queues | KMS customer-managed key | HTTPS |
+| SNS alarm topic | KMS customer-managed key | HTTPS |
 | RDS | Storage encryption enabled | TLS required for every connection (`sslmode=require`; IAM authentication only works over TLS) |
 | SSM parameters | Standard parameters hold no secrets | HTTPS |
 
-The customer-managed key (`alias/fintrust-capstone`) has automatic yearly rotation enabled. Its key policy is the AWS default, which hands control to IAM in this account; which role may use the key, and how, is then written in that role's own policy next to its other permissions. Only `kms:Decrypt` and `kms:GenerateDataKey` are ever granted, and a test fails the build if any role is given a key-management action.
+The customer-managed key (`alias/fintrust-capstone`) has automatic yearly rotation enabled. Its key policy (`infrastructure/kms/key-policy.json`) has two statements. The first is the AWS default, which hands control to IAM in this account; which role may use the key, and how, is then written in that role's own policy next to its other permissions. The second lets the CloudWatch service use the key, so that an alarm can publish to the encrypted alarm topic; a service is not an IAM role, so the key policy is the only place this can be granted. Only `kms:Decrypt` and `kms:GenerateDataKey` are ever granted, and a test fails the build if any role is given a key-management action.
 
 The bucket policy uses `"Action": "s3:*"` in a **Deny** statement (refuse anything not sent over TLS). A wildcard in a Deny removes access; it cannot grant any. The "no wildcard actions" rule applies to the Allow statements in the Lambda roles.
 
@@ -109,7 +110,8 @@ The bucket policy uses `"Action": "s3:*"` in a **Deny** statement (refuse anythi
 
 - Structured JSON logs from every Lambda, 30-day retention.
 - Logs never contain customer names, contact details or full account numbers.
-- CloudWatch alarms on error rate, high-risk transaction count and DLQ depth.
+- Seven CloudWatch alarms: scoring error rate, high-risk transaction count, the three dead-letter queues, Lambda errors and API server errors. Each emails an encrypted SNS topic. See [monitoring.md](monitoring.md).
+- Custom metrics are published as log lines, so no Lambda role needs `cloudwatch:PutMetricData`.
 - **CloudWatch** answers "is the system healthy?" (operations). **CloudTrail** answers "who changed what in the account?" (audit). CloudTrail's 90-day event history is on by default and is the audit record for IAM and infrastructure changes.
 
 ## Secrets handling in the repository

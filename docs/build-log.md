@@ -383,7 +383,7 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 
 ### Evidence to capture (save in `docs/evidence/`)
 
-- [ ] `w14d1-verify-write-api-alerts.png`: terminal output of `python scripts/verify_write_api_alerts.py` ending in "23 of 23 checks passed"
+- [ ] `w14d1-verify-write-api-alerts.png`: terminal output of `python scripts/verify_write_api_alerts.py` ending in "24 of 24 checks passed"
 - [ ] `w14d1-ses-alert-email.png`: the alert email open in Gmail, showing the subject, masked account and rule breakdown (a required screenshot in the brief)
 - [ ] `w14d1-ses-verified-identity.png`: SES console, Identities, the address with status Verified
 - [ ] `w14d1-alert-lambda-trigger.png`: Lambda console, `fintrust-capstone-alert`, Configuration, Triggers, showing the DynamoDB trigger and its filter
@@ -408,3 +408,70 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 | Rubric C3: modules present | 9 of 10 (`report` remains, Week 14 Day 4) |
 
 **Open items carried forward:** CloudWatch alarms on both dead-letter queues and on the high-risk count (Week 14 Day 2); the dashboard that uses these routes, and tightening CORS to its address (Week 14 Day 4); the dead-letter break-and-recover run on the real account (Week 14 Day 5).
+
+---
+
+## Week 14 Day 2: CloudWatch Monitoring and Observability
+
+**Built on:** Wednesday 7 October 2026 (brief slot: Week 14 Day 2, Tuesday 6 October 2026)
+**Branch:** `feature/w14d2-monitoring`
+
+### What was built
+
+| Item | Where |
+|---|---|
+| Custom metrics in the `FinTrust/ETL` namespace (9 metrics), published as log lines | `fintrust/metrics.py`, called from `ingest.py`, `score.py`, `alert.py` |
+| Encrypted SNS topic for alarm emails | `infrastructure/monitoring/deploy_monitoring.sh` |
+| Seven alarms: scoring error rate, high-risk count, three dead-letter queues, Lambda errors, API 5xx | same script, with `alarm-scoring-error-rate.json` and `alarm-lambda-errors.json` |
+| Operations dashboard (13 widgets) | `infrastructure/monitoring/dashboard.json` |
+| Nine saved Logs Insights queries, including failed ingestion | `infrastructure/monitoring/queries.json`, `save_queries.py` |
+| X-Ray tracing on the API stage (already on for every Lambda) | `infrastructure/apigateway/deploy_api.sh` |
+| Key policy allowing CloudWatch to publish to the encrypted topic | `infrastructure/kms/key-policy.json`, `deploy_key.sh` |
+| Dead-letter queue redrive script (the action the DLQ alarm asks for) | `scripts/redrive_dlq.sh` |
+| Monitoring guide: metrics, alarms and what to do when each fires | `docs/monitoring.md` |
+| Live verification with real traffic | `scripts/verify_monitoring.py` |
+
+### Key decisions
+
+1. **Metrics are published as log lines (Embedded Metric Format), not through the CloudWatch API.** The score Lambda is in the VPC with no NAT Gateway and cannot reach the CloudWatch API; its logs always arrive. It also means no extra IAM permission and no call that can fail inside a function.
+2. **Nine metrics, one dimension.** The Free Tier allows 10 custom metrics. Each name is one metric; the code refuses any name not on the list, so a typing mistake cannot create a billable metric.
+3. **The error rate counts real outcomes, not Lambda crashes.** A failed scoring attempt does not crash the Lambda (it reports the failed message and continues), so Lambda's own `Errors` metric would stay at zero. `ScoringFailures ÷ (ScoringFailures + TransactionsScored)` measures what actually happened.
+4. **A redelivered transaction is not counted twice.** Only transactions written to the ledger for the first time are counted, so the metrics agree with the database.
+5. **Every alarm treats "no data" as healthy and also emails when it recovers.** The system is idle most of the time; idle must not look like an outage.
+6. **Each dead-letter queue has its own alarm.** A message in a dead-letter queue always needs a person, so the threshold is "more than zero".
+7. **The alarm topic is encrypted, which required one key policy statement.** CloudWatch is a service, not an IAM role, so it is allowed in the key policy with two actions only.
+8. **Queries are saved in the account and tested against the code.** A test fails if a query filters on a log message that no function writes, or if the documentation and the saved query differ.
+9. **X-Ray uses Lambda's built-in tracing only.** No SDK was added to the code; the trade-off is recorded in `docs/monitoring.md`.
+10. **Journey event times are recorded to the microsecond.** Found on first run on a faster machine: two events of the same stage written within one millisecond shared a sort key in DynamoDB, so the second replaced the first. The time in the key is now microseconds, with a regression test. In production the attempts are at least 60 seconds apart, so no deployed data was affected.
+
+### Test results
+
+- `pytest`: 701 passing (572 unit, 129 integration against PostgreSQL 16).
+- 18 new tests cover the metric line's exact shape and the counts each Lambda publishes, including the redelivery, held-back-message and failed-email cases.
+- 24 new tests check the alarm, dashboard, query and key policy files: only published metrics are used, widgets do not overlap, the Free Tier limits hold, and every saved query matches the documentation and the log messages in the code.
+- The deployment scripts and the configuration half of `verify_monitoring.py` were run against a local AWS simulator. The simulator cannot turn log lines into metrics, save queries, record traces or redrive a queue, so those are first proven on the real account by `verify_monitoring.py` (and the redrive in Week 14 Day 5).
+
+### Evidence to capture (save in `docs/evidence/`)
+
+- [ ] `w14d2-verify-monitoring.png`: terminal output of `python scripts/verify_monitoring.py` ending in "28 of 28 checks passed"
+- [ ] `w14d2-dashboard.png`: CloudWatch console, Dashboards, `fintrust-capstone-operations`, after the verifier has run (a required screenshot in the brief)
+- [ ] `w14d2-alarms.png`: CloudWatch console, All alarms, showing the seven alarms
+- [ ] `w14d2-custom-metrics.png`: CloudWatch console, Metrics, All metrics, `FinTrust/ETL`, Environment, with the nine metrics listed
+- [ ] `w14d2-logs-insights-failed-ingestion.png`: Logs Insights, saved query "1 Failed ingestion", after running it
+- [ ] `w14d2-xray-trace-map.png`: CloudWatch console, Trace Map, showing the API and the Lambda functions
+- [ ] `w14d2-alarm-email.png`: the ALARM email from AWS Notifications in Gmail
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Custom metrics namespace `FinTrust/ETL` | Met (9 metrics) |
+| Alarm on error rate | Met (`scoring-error-rate`) |
+| Alarm on high-risk transaction count | Met (`high-risk-count`) |
+| Logs Insights queries for failed ingestion | Met (saved query 1, plus 8 more) |
+| X-Ray tracing enabled | Met (API stage and every Lambda) |
+| Demo: "shows the CloudWatch dashboard while transactions ingest" | Ready (`fintrust-capstone-operations`) |
+| Rubric C1: DLQ failure is detected | Met (an alarm on each dead-letter queue) |
+| Free Tier: 10 metrics, 10 alarms | 9 metrics, 8 alarms |
+
+**Open items carried forward:** the `report` Lambda joins the Lambda errors alarm and the dashboard when it is built (Week 14 Day 4); the dead-letter break-and-recover run on the real account, with the alarm firing and `redrive_dlq.sh` (Week 14 Day 5).

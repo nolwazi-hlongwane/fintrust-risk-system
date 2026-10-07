@@ -1,0 +1,577 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 2,
+      "properties": {
+        "markdown": "# FinTrust transaction pipeline\nCSV upload \u2192 **ingest** (validate) \u2192 SQS FIFO queue \u2192 **score** (ledger + risk score) \u2192 **alert** (email for HIGH risk). Rows read should equal rows queued plus rows quarantined. Any message in a dead-letter queue needs a person to look at it."
+      }
+    },
+    {
+      "type": "alarm",
+      "x": 0,
+      "y": 2,
+      "width": 24,
+      "height": 3,
+      "properties": {
+        "title": "Alarms",
+        "alarms": [
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:__PREFIX__-scoring-error-rate",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:__PREFIX__-high-risk-count",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:__PREFIX__-transactions-dlq-depth",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:__PREFIX__-ingest-dlq-depth",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:__PREFIX__-alert-dlq-depth",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:__PREFIX__-lambda-errors",
+          "arn:aws:cloudwatch:__REGION__:__ACCOUNT_ID__:alarm:__PREFIX__-api-5xx-errors"
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 5,
+      "width": 24,
+      "height": 3,
+      "properties": {
+        "title": "Totals for the selected time range",
+        "region": "__REGION__",
+        "view": "singleValue",
+        "stat": "Sum",
+        "period": 300,
+        "setPeriodToTimeRange": true,
+        "metrics": [
+          [
+            "FinTrust/ETL",
+            "RowsRead",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Rows read"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "RowsQuarantined",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Rows quarantined"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "TransactionsScored",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Transactions scored"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "HighRiskTransactions",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "High risk"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "AlertsSent",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Alert emails sent"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "ScoringFailures",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Scoring failures"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 8,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "1. Ingest: rows per minute",
+        "region": "__REGION__",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          [
+            "FinTrust/ETL",
+            "RowsRead",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Rows read"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "RowsQueued",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Rows queued (valid)"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "RowsQuarantined",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Rows quarantined (invalid)"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "FilesRejected",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Files rejected"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 8,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "2. Scoring: transactions per minute",
+        "region": "__REGION__",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          [
+            "FinTrust/ETL",
+            "TransactionsScored",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Scored"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "HighRiskTransactions",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "High risk"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "ScoringFailures",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Failed attempts"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 8,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "3. Alerts: emails per minute",
+        "region": "__REGION__",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          [
+            "FinTrust/ETL",
+            "AlertsSent",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Sent"
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "AlertFailures",
+            "Environment",
+            "__ENV__",
+            {
+              "label": "Failed attempts"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 14,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "Queues: messages waiting",
+        "region": "__REGION__",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "Maximum",
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/SQS",
+            "ApproximateNumberOfMessagesVisible",
+            "QueueName",
+            "__PREFIX__-transactions.fifo",
+            {
+              "label": "Scoring queue"
+            }
+          ],
+          [
+            "AWS/SQS",
+            "ApproximateNumberOfMessagesVisible",
+            "QueueName",
+            "__PREFIX__-transactions-dlq.fifo",
+            {
+              "label": "Scoring dead-letter queue"
+            }
+          ],
+          [
+            "AWS/SQS",
+            "ApproximateNumberOfMessagesVisible",
+            "QueueName",
+            "__PREFIX__-ingest-dlq",
+            {
+              "label": "Ingest dead-letter queue"
+            }
+          ],
+          [
+            "AWS/SQS",
+            "ApproximateNumberOfMessagesVisible",
+            "QueueName",
+            "__PREFIX__-alert-dlq",
+            {
+              "label": "Alert dead-letter queue"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 14,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "Lambda: invocations and errors",
+        "region": "__REGION__",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/Lambda",
+            "Invocations",
+            "FunctionName",
+            "__PREFIX__-ingest",
+            {
+              "label": "ingest invocations"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Invocations",
+            "FunctionName",
+            "__PREFIX__-score",
+            {
+              "label": "score invocations"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Invocations",
+            "FunctionName",
+            "__PREFIX__-alert",
+            {
+              "label": "alert invocations"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Invocations",
+            "FunctionName",
+            "__PREFIX__-query",
+            {
+              "label": "query invocations"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Errors",
+            "FunctionName",
+            "__PREFIX__-ingest",
+            {
+              "label": "ingest errors"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Errors",
+            "FunctionName",
+            "__PREFIX__-score",
+            {
+              "label": "score errors"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Errors",
+            "FunctionName",
+            "__PREFIX__-alert",
+            {
+              "label": "alert errors"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Errors",
+            "FunctionName",
+            "__PREFIX__-query",
+            {
+              "label": "query errors"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 14,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "Lambda: duration (p95, milliseconds)",
+        "region": "__REGION__",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "p95",
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/Lambda",
+            "Duration",
+            "FunctionName",
+            "__PREFIX__-ingest",
+            {
+              "label": "ingest"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Duration",
+            "FunctionName",
+            "__PREFIX__-score",
+            {
+              "label": "score"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Duration",
+            "FunctionName",
+            "__PREFIX__-alert",
+            {
+              "label": "alert"
+            }
+          ],
+          [
+            "AWS/Lambda",
+            "Duration",
+            "FunctionName",
+            "__PREFIX__-query",
+            {
+              "label": "query"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 20,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "API: requests and errors",
+        "region": "__REGION__",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/ApiGateway",
+            "Count",
+            "ApiName",
+            "__PREFIX__-api",
+            "Stage",
+            "__ENV__",
+            {
+              "label": "Requests"
+            }
+          ],
+          [
+            "AWS/ApiGateway",
+            "4XXError",
+            "ApiName",
+            "__PREFIX__-api",
+            "Stage",
+            "__ENV__",
+            {
+              "label": "4xx (caller errors)"
+            }
+          ],
+          [
+            "AWS/ApiGateway",
+            "5XXError",
+            "ApiName",
+            "__PREFIX__-api",
+            "Stage",
+            "__ENV__",
+            {
+              "label": "5xx (our errors)"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 20,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "API: latency (p95, milliseconds)",
+        "region": "__REGION__",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "p95",
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/ApiGateway",
+            "Latency",
+            "ApiName",
+            "__PREFIX__-api",
+            "Stage",
+            "__ENV__",
+            {
+              "label": "Latency"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 20,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "Scoring error rate (%)",
+        "region": "__REGION__",
+        "view": "timeSeries",
+        "stacked": false,
+        "stat": "Sum",
+        "period": 300,
+        "metrics": [
+          [
+            {
+              "expression": "IF(failures + scored > 0, 100 * failures / (failures + scored), 0)",
+              "label": "Error rate (%)",
+              "id": "rate",
+              "period": 300
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "ScoringFailures",
+            "Environment",
+            "__ENV__",
+            {
+              "id": "failures",
+              "visible": false,
+              "period": 300
+            }
+          ],
+          [
+            "FinTrust/ETL",
+            "TransactionsScored",
+            "Environment",
+            "__ENV__",
+            {
+              "id": "scored",
+              "visible": false,
+              "period": 300
+            }
+          ]
+        ],
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Alarm threshold",
+              "value": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 26,
+      "width": 24,
+      "height": 6,
+      "properties": {
+        "title": "Latest errors and warnings from all four functions",
+        "region": "__REGION__",
+        "view": "table",
+        "query": "SOURCE '/aws/lambda/__PREFIX__-ingest' | SOURCE '/aws/lambda/__PREFIX__-score' | SOURCE '/aws/lambda/__PREFIX__-alert' | SOURCE '/aws/lambda/__PREFIX__-query' | fields @timestamp, service, level, message, transaction_id, source_key, error | filter level in ['ERROR', 'WARNING'] | sort @timestamp desc | limit 25"
+      }
+    }
+  ]
+}

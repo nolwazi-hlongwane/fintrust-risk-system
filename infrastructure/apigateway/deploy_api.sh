@@ -77,6 +77,11 @@ aws apigateway create-deployment --rest-api-id "$API_ID" --stage-name "$STAGE" \
     --description "Deployed by deploy_api.sh" >/dev/null
 echo "Deployed to stage $STAGE"
 
+# X-Ray: trace each request from API Gateway into the Lambda (Week 14 Day 2).
+aws apigateway update-stage --rest-api-id "$API_ID" --stage-name "$STAGE" \
+    --patch-operations op=replace,path=/tracingEnabled,value=true >/dev/null
+echo "X-Ray tracing enabled on stage $STAGE"
+
 # ---------- usage plan and API key ----------
 PLAN_NAME="${PREFIX}-usage-plan"
 PLAN_ID="$(aws apigateway get-usage-plans --query "items[?name=='${PLAN_NAME}'].id | [0]" --output text | none_to_empty)"

@@ -30,8 +30,8 @@ It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is 
 | Week 13 Day 4 | ETL Lambda | Done |
 | Week 13 Day 5 | API Backend Part 1 | Done |
 | Week 14 Day 1 | Write API and Alert System | Done |
-| Week 14 Day 2 | CloudWatch Monitoring and Observability | Next |
-| Week 14 Day 3 | Automated Testing | |
+| Week 14 Day 2 | CloudWatch Monitoring and Observability | Done |
+| Week 14 Day 3 | Automated Testing | Next |
 | Week 14 Day 4 | SQL Analytics and Reporting Layer | |
 | Week 14 Day 5 | End-to-End Integration and Submission | |
 
@@ -48,6 +48,7 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 | [Data management design](docs/data-governance.md) | POPIA, data quality, retention, migration, risk register |
 | [ERD](docs/erd.md) | Database tables and relationships |
 | [SQL](sql/) | `schema.sql`, `functions.sql`, `db_users.sql`, `seed.sql` |
+| [Monitoring](docs/monitoring.md) | Metrics, alarms and what to do when one fires, dashboard, tracing |
 | [Logs Insights queries](docs/logs-insights-queries.md) | Ready-made queries for the structured logs |
 | [Build log](docs/build-log.md) | What was built in each phase, with test results |
 
@@ -219,6 +220,22 @@ curl -s -H "x-api-key: $API_KEY" "$API_URL/alerts?status=OPEN" | python3 -m json
 curl -s -X POST -H "x-api-key: $API_KEY" -H "Content-Type: application/json" \
      -d '{"account_id": "ACC-1007", "reason": "Repeated high-value cross-border payments"}' "$API_URL/flag" | python3 -m json.tool
 ```
+
+### Step 7: monitoring (Week 14 Day 2)
+
+```bash
+./infrastructure/kms/deploy_key.sh                       # key policy: let CloudWatch use the key
+./infrastructure/lambda/deploy_function.sh ingest        # the three functions that publish metrics
+./infrastructure/lambda/deploy_function.sh score
+./infrastructure/lambda/deploy_function.sh alert
+./infrastructure/apigateway/deploy_api.sh                # X-Ray tracing on the API stage
+./infrastructure/monitoring/deploy_monitoring.sh         # alarm topic, 7 alarms, dashboard, saved queries
+python scripts/verify_monitoring.py                      # real traffic, then check metrics, logs and traces
+```
+
+`deploy_monitoring.sh` sends a subscription email: click **Confirm subscription** in it before running the verifier. The database must be running for the verifier.
+
+If the `transactions-dlq-depth` alarm fires, fix the cause and then move the waiting messages back with `./scripts/redrive_dlq.sh`.
 
 ## Sample data
 
