@@ -2,7 +2,7 @@
 
 The tunnel must be open in another terminal window first: ./scripts/db_tunnel.sh
 
-    python scripts/run_sql.py sql/schema.sql sql/db_users.sql sql/seed.sql
+    python scripts/run_sql.py sql/schema.sql sql/functions.sql sql/db_users.sql sql/seed.sql
     python scripts/run_sql.py -c "SELECT risk_level, count(*) FROM transactions GROUP BY 1"
 
 The admin password is read from SSM Parameter Store (encrypted) at run time. It

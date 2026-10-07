@@ -2,7 +2,7 @@
 -- FinTrust: database users, one per Lambda that connects to PostgreSQL
 -- Brief slot: Week 13 Day 2 (Data Layer)
 --
--- Run after schema.sql:   psql -f sql/db_users.sql
+-- Run after schema.sql and functions.sql:   psql -f sql/db_users.sql
 -- Safe to run more than once.
 --
 -- Least privilege inside the database, as a second layer behind IAM:
@@ -50,6 +50,9 @@ GRANT INSERT ON transactions, risk_events, alerts TO fintrust_score;
 -- resolution columns of an alert.
 GRANT SELECT ON customers, accounts, transactions, risk_events, alerts TO fintrust_query;
 GRANT UPDATE (status, resolved_at, resolved_by, resolution_note) ON alerts TO fintrust_query;
+-- It cannot insert risk events or update accounts directly. To flag an account
+-- it may only call the flag_account function (see functions.sql).
+GRANT EXECUTE ON FUNCTION flag_account(VARCHAR, VARCHAR) TO fintrust_query;
 
 -- report Lambda: read only.
 GRANT SELECT ON customers, accounts, transactions, risk_events, alerts TO fintrust_report;

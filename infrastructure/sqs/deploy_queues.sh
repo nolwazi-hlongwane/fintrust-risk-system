@@ -17,7 +17,12 @@
 #       Receives the S3 event if the ingest Lambda itself fails after Lambda's
 #       own retries, so a failed FILE is not lost either.
 #
-# All three are encrypted with the project KMS key.
+#   fintrust-capstone-alert-dlq               standard queue
+#       Receives the details of an alert email that still could not be sent
+#       after the alert Lambda's retries. (The alert itself is already safe in
+#       the ledger and visible on the dashboard; only the EMAIL is at stake.)
+#
+# All four are encrypted with the project KMS key.
 # Safe to run more than once.
 # Usage:  ./infrastructure/sqs/deploy_queues.sh
 
@@ -111,6 +116,9 @@ aws sqs set-queue-attributes --queue-url "$DLQ_URL" --attributes "file://$WORK/d
 # ---------- 3. dead-letter queue for failed ingest invocations (standard) ----------
 INGEST_DLQ_URL="$(ensure_queue "$INGEST_DLQ_NAME" "$WORK/dlq.json")"
 
+# ---------- 4. dead-letter queue for alert emails that could not be sent (standard) ----------
+ALERT_DLQ_URL="$(ensure_queue "$ALERT_DLQ_NAME" "$WORK/dlq.json")"
+
 echo "Saving settings:"
 put_param queue_url "$QUEUE_URL"
 
@@ -119,6 +127,7 @@ echo "Queues ready:"
 echo "  Main       $QUEUE_URL"
 echo "  DLQ        $DLQ_URL"
 echo "  Ingest DLQ $INGEST_DLQ_URL"
+echo "  Alert DLQ  $ALERT_DLQ_URL"
 aws sqs get-queue-attributes --queue-url "$QUEUE_URL" \
     --attribute-names FifoQueue VisibilityTimeout RedrivePolicy KmsMasterKeyId \
     --query Attributes --output table

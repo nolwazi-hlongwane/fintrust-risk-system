@@ -4,17 +4,38 @@
     {
       "Sid": "DatabaseLoginAsQueryUserOnly",
       "Effect": "Allow",
-      "Action": ["rds-db:connect"],
+      "Action": [
+        "rds-db:connect"
+      ],
       "Resource": "arn:aws:rds-db:__REGION__:__ACCOUNT_ID__:dbuser:__DBI_RESOURCE_ID__/fintrust_query"
     },
     {
       "Sid": "ReadScoresAndEvents",
       "Effect": "Allow",
-      "Action": ["dynamodb:Query", "dynamodb:GetItem"],
+      "Action": [
+        "dynamodb:Query",
+        "dynamodb:GetItem"
+      ],
       "Resource": [
         "arn:aws:dynamodb:__REGION__:__ACCOUNT_ID__:table/__PREFIX__-events",
         "arn:aws:dynamodb:__REGION__:__ACCOUNT_ID__:table/__PREFIX__-events/index/by_transaction"
       ]
+    },
+    {
+      "Sid": "StoreUploadedFilesUnderUploadsOnly",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::__PREFIX__-raw-__ACCOUNT_ID__/uploads/*"
+    },
+    {
+      "Sid": "EncryptUploadedFiles",
+      "Effect": "Allow",
+      "Action": [
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "__KMS_KEY_ARN__"
     }
   ]
 }

@@ -30,15 +30,17 @@ One row per Lambda function. "Base" permissions are deployed now; the rest are t
 | | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` | Transactions FIFO queue | Deployed W13 D3 |
 | | `kms:Decrypt` | The project key | Deployed W13 D3 |
 | **alert** (`fintrust-capstone-alert-role`) | Logs, X-Ray, SSM (as ingest) | Own log group; `/fintrust/dev/*` | Deployed W13 D1 |
-| | `dynamodb:GetRecords`, `GetShardIterator`, `DescribeStream`, `ListStreams` | Events table stream | W14 D1 |
-| | `dynamodb:PutItem` | Events table | W14 D1 |
-| | `ses:SendEmail` | The verified sender identity only | W14 D1 |
-| | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | W14 D1 |
+| | `dynamodb:GetRecords`, `GetShardIterator`, `DescribeStream` | Events table stream | Deployed W14 D1 |
+| | `dynamodb:ListStreams` | `*` (AWS does not support a narrower resource for this action) | Deployed W14 D1 |
+| | `dynamodb:GetItem`, `dynamodb:PutItem` | Events table (alert markers and journey steps) | Deployed W14 D1 |
+| | `ses:SendEmail` | The verified sender and recipient identities only | Deployed W14 D1 |
+| | `sqs:SendMessage` | Alert dead-letter queue only | Deployed W14 D1 |
+| | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | Deployed W14 D1 |
 | **query** (`fintrust-capstone-query-role`) | Logs, X-Ray, network interfaces (as score) | Own log group | Deployed W13 D1 |
 | | `rds-db:connect` | Database user `fintrust_query` only | Deployed W13 D2 |
 | | `dynamodb:Query`, `dynamodb:GetItem` | Events table and its index | Deployed W13 D2 |
-| | `s3:PutObject` | Raw bucket, `uploads/` prefix only | W14 D1 |
-| | `kms:GenerateDataKey` | The project key | W14 D1 |
+| | `s3:PutObject` | Raw bucket, `uploads/` prefix only | Deployed W14 D1 |
+| | `kms:GenerateDataKey` | The project key | Deployed W14 D1 |
 | **report** (`fintrust-capstone-report-role`) | Logs, X-Ray, network interfaces (as score) | Own log group | Deployed W13 D1 |
 | | `rds-db:connect` | Database user `fintrust_report` only | Deployed W13 D2 |
 | | `s3:PutObject` | Reports bucket objects | W14 D4 |

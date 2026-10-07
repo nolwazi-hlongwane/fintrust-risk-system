@@ -18,6 +18,7 @@ Each run adds 15 sample transactions (dated 1 to 5 October 2026) to the ledger.
 
 import json
 import os
+import ssl
 import sys
 import time
 import urllib.error
@@ -28,6 +29,16 @@ from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError
+
+try:
+    # Python installed from python.org on macOS does not use the system's trusted
+    # certificates, so HTTPS fails with CERTIFICATE_VERIFY_FAILED. certifi (already
+    # installed with boto3's dependencies) provides the same trusted list.
+    import certifi
+
+    TLS = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    TLS = ssl.create_default_context()
 
 REGION = os.environ.get("AWS_REGION", "eu-north-1")
 PREFIX = "fintrust-capstone"
@@ -60,7 +71,7 @@ def call(url, path, params=None, key=None):
     full = f"{url}{path}" + (("?" + urllib.parse.urlencode(params)) if params else "")
     request = urllib.request.Request(full, headers={"x-api-key": key} if key else {})
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=30, context=TLS) as response:
             status, text = response.status, response.read().decode("utf-8")
     except urllib.error.HTTPError as error:
         status, text = error.code, error.read().decode("utf-8")

@@ -24,6 +24,16 @@ export DBI_RESOURCE_ID
 KMS_KEY_ARN="$(kms_key_arn)"
 export KMS_KEY_ARN
 
+# The only addresses the alert Lambda may send email from and to. (While an
+# account is in the SES sandbox, SES checks permission on the recipient's
+# identity as well as the sender's.) They are read from SSM so that no email
+# address is stored in the repository.
+ALERT_SENDER="$(aws ssm get-parameter --name "/fintrust/${FINTRUST_ENV}/alert_sender" \
+    --query Parameter.Value --output text 2>/dev/null || true)"
+ALERT_RECIPIENT="$(aws ssm get-parameter --name "/fintrust/${FINTRUST_ENV}/alert_recipient" \
+    --query Parameter.Value --output text 2>/dev/null || true)"
+export ALERT_SENDER ALERT_RECIPIENT
+
 for FN in $FUNCTIONS; do
   TEMPLATE="$POLICIES/${FN}-data.json"
   [[ -f "$TEMPLATE" ]] || continue
@@ -31,7 +41,8 @@ for FN in $FUNCTIONS; do
   if grep -q "__[A-Z_]*__" "$RENDERED/${FN}-data.json"; then
     echo "ERROR: ${FN}-data.json still has an unfilled value:" >&2
     grep -o "__[A-Z_]*__" "$RENDERED/${FN}-data.json" | sort -u >&2
-    echo "The database (deploy_rds.sh) and the KMS key (deploy_key.sh) must exist first." >&2
+    echo "The database (deploy_rds.sh), the KMS key (deploy_key.sh) and the SSM" >&2
+    echo "parameters (put_parameters.sh) must exist first." >&2
     exit 1
   fi
   aws iam put-role-policy --role-name "${PREFIX}-${FN}-role" \

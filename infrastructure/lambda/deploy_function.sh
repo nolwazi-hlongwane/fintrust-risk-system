@@ -4,6 +4,7 @@
 #   ./infrastructure/lambda/deploy_function.sh ingest
 #   ./infrastructure/lambda/deploy_function.sh score
 #   ./infrastructure/lambda/deploy_function.sh query
+#   ./infrastructure/lambda/deploy_function.sh alert
 #
 # What it does:
 #   1. Builds a zip of the fintrust/ package in build/ (ignored by git). For
@@ -16,6 +17,8 @@
 #                retries); the raw bucket invokes it for every new .csv object
 #        score   the transactions FIFO queue is connected as its event source
 #        query   nothing here; API Gateway is connected by deploy_api.sh
+#        alert   the events table's DynamoDB stream is connected, filtered so the
+#                function is only invoked for HIGH risk scores
 #
 # Safe to run more than once: run it again after any code change.
 
@@ -46,9 +49,16 @@ case "$FN" in
     IN_VPC="yes"         # needs the database
     DESCRIPTION="FinTrust REST API: transactions, journey and risk insights"
     ;;
+  alert)
+    HANDLER="fintrust.alert.handler"
+    TIMEOUT=30
+    MEMORY=256
+    IN_VPC="no"          # needs SES (no free VPC endpoint) and never touches RDS
+    DESCRIPTION="FinTrust alerts: email compliance when a transaction is scored HIGH"
+    ;;
   *)
     echo "Usage: $0 <function>" >&2
-    echo "Functions available so far: ingest, score, query" >&2
+    echo "Functions available so far: ingest, score, query, alert" >&2
     exit 1
     ;;
 esac
@@ -170,6 +180,50 @@ if [[ "$FN" == "score" ]]; then
     aws lambda update-event-source-mapping --uuid "$MAPPING" --batch-size 10 \
         --function-response-types ReportBatchItemFailures >/dev/null
     echo "Queue already connected: ${QUEUE_NAME} -> ${FUNCTION_NAME}"
+  fi
+fi
+
+if [[ "$FN" == "alert" ]]; then
+  STREAM_ARN="$(aws dynamodb describe-table --table-name "$TABLE_NAME" \
+      --query Table.LatestStreamArn --output text | none_to_empty)"
+  if [[ -z "$STREAM_ARN" ]]; then
+    echo "ERROR: the events table has no stream. Run ./infrastructure/dynamodb/deploy_table.sh first." >&2
+    exit 1
+  fi
+  # The filter is applied by the Lambda service BEFORE invoking the function:
+  # only new or changed SCORE items with risk_level HIGH get through. LOW and
+  # MEDIUM scores and journey events never start the function, which keeps
+  # invocations (and cost) to a minimum.
+  cat > "$ROOT/build/alert-filter.json" <<'JSON'
+{
+  "Filters": [
+    {
+      "Pattern": "{\"eventName\": [\"INSERT\", \"MODIFY\"], \"dynamodb\": {\"NewImage\": {\"record_type\": {\"S\": [\"SCORE\"]}, \"risk_level\": {\"S\": [\"HIGH\"]}}}}"
+    }
+  ]
+}
+JSON
+  # If sending still fails after 3 retries, the record's details go to the alert
+  # dead-letter queue instead of blocking the stream. BisectBatchOnFunctionError
+  # splits a failing batch in two so one bad record cannot hold back the others.
+  cat > "$ROOT/build/alert-destination.json" <<JSON
+{"OnFailure": {"Destination": "$(queue_arn "$ALERT_DLQ_NAME")"}}
+JSON
+  MAPPING="$(aws lambda list-event-source-mappings --function-name "$FUNCTION_NAME" \
+      --event-source-arn "$STREAM_ARN" --query 'EventSourceMappings[0].UUID' --output text | none_to_empty)"
+  if [[ -z "$MAPPING" ]]; then
+    aws lambda create-event-source-mapping --function-name "$FUNCTION_NAME" \
+        --event-source-arn "$STREAM_ARN" --starting-position LATEST --batch-size 10 \
+        --maximum-retry-attempts 3 --maximum-record-age-in-seconds 3600 --bisect-batch-on-function-error \
+        --filter-criteria "file://$ROOT/build/alert-filter.json" \
+        --destination-config "file://$ROOT/build/alert-destination.json" >/dev/null
+    echo "Stream connected: ${TABLE_NAME} (HIGH scores only) -> ${FUNCTION_NAME}"
+  else
+    aws lambda update-event-source-mapping --uuid "$MAPPING" --batch-size 10 \
+        --maximum-retry-attempts 3 --maximum-record-age-in-seconds 3600 --bisect-batch-on-function-error \
+        --filter-criteria "file://$ROOT/build/alert-filter.json" \
+        --destination-config "file://$ROOT/build/alert-destination.json" >/dev/null
+    echo "Stream already connected: ${TABLE_NAME} (HIGH scores only) -> ${FUNCTION_NAME}"
   fi
 fi
 

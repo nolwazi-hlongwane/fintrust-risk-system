@@ -29,8 +29,8 @@ It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is 
 | Week 13 Day 3 | Security and Storage | Done |
 | Week 13 Day 4 | ETL Lambda | Done |
 | Week 13 Day 5 | API Backend Part 1 | Done |
-| Week 14 Day 1 | Write API and Alert System | Next |
-| Week 14 Day 2 | CloudWatch Monitoring and Observability | |
+| Week 14 Day 1 | Write API and Alert System | Done |
+| Week 14 Day 2 | CloudWatch Monitoring and Observability | Next |
 | Week 14 Day 3 | Automated Testing | |
 | Week 14 Day 4 | SQL Analytics and Reporting Layer | |
 | Week 14 Day 5 | End-to-End Integration and Submission | |
@@ -47,7 +47,7 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 | [Security plan and IAM role matrix](docs/security-plan.md) | Who and what can access which resource |
 | [Data management design](docs/data-governance.md) | POPIA, data quality, retention, migration, risk register |
 | [ERD](docs/erd.md) | Database tables and relationships |
-| [SQL](sql/) | `schema.sql`, `db_users.sql`, `seed.sql` |
+| [SQL](sql/) | `schema.sql`, `functions.sql`, `db_users.sql`, `seed.sql` |
 | [Logs Insights queries](docs/logs-insights-queries.md) | Ready-made queries for the structured logs |
 | [Build log](docs/build-log.md) | What was built in each phase, with test results |
 
@@ -130,7 +130,7 @@ The database has no public address. To load the schema, open the private tunnel 
 Then, back in the first window:
 
 ```bash
-python scripts/run_sql.py sql/schema.sql sql/db_users.sql sql/seed.sql
+python scripts/run_sql.py sql/schema.sql sql/functions.sql sql/db_users.sql sql/seed.sql
 python scripts/run_sql.py -c "SELECT risk_level, count(*) FROM transactions GROUP BY 1 ORDER BY 1"
 ```
 
@@ -191,6 +191,33 @@ To call the API yourself:
 source ./scripts/api_env.sh
 curl -s -H "x-api-key: $API_KEY" "$API_URL/transactions?account_id=ACC-1007&risk_level=HIGH" | python3 -m json.tool
 curl -s -H "x-api-key: $API_KEY" "$API_URL/insights" | python3 -m json.tool
+```
+
+### Step 6: write API and alert emails (Week 14 Day 1)
+
+The database must be running (`./scripts/rds_start.sh`) and the tunnel open in a second terminal window (`./scripts/db_tunnel.sh`).
+
+```bash
+python scripts/run_sql.py sql/functions.sql sql/db_users.sql   # flag_account function and the right to run it
+./infrastructure/iam/deploy_roles.sh                     # refresh the permission boundary
+./infrastructure/sqs/deploy_queues.sh                    # adds the alert dead-letter queue
+./infrastructure/ses/deploy_ses.sh                       # sends a verification email: click the link, then run again
+./infrastructure/iam/apply_data_policies.sh              # alert and upload permissions
+./infrastructure/lambda/deploy_function.sh query         # API Lambda with the write routes
+./infrastructure/lambda/deploy_function.sh alert         # alert Lambda, connected to the DynamoDB stream
+./infrastructure/apigateway/deploy_api.sh                # adds /alerts, /upload, /flag and /resolve
+python scripts/verify_write_api_alerts.py                # upload through the API and check the alert email
+```
+
+To use the write routes yourself:
+
+```bash
+source ./scripts/api_env.sh
+curl -s -X POST -H "x-api-key: $API_KEY" -H "Content-Type: text/csv" \
+     --data-binary @data/sample_transactions_mixed.csv "$API_URL/upload?filename=mixed.csv" | python3 -m json.tool
+curl -s -H "x-api-key: $API_KEY" "$API_URL/alerts?status=OPEN" | python3 -m json.tool
+curl -s -X POST -H "x-api-key: $API_KEY" -H "Content-Type: application/json" \
+     -d '{"account_id": "ACC-1007", "reason": "Repeated high-value cross-border payments"}' "$API_URL/flag" | python3 -m json.tool
 ```
 
 ## Sample data

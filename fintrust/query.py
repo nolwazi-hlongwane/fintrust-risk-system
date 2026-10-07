@@ -4,11 +4,17 @@ API Gateway checks the API key, then passes the whole HTTP request to this
 function as one event ("Lambda proxy integration"). The function decides which
 route was called, runs it, and returns the status code, headers and JSON body.
 
-Routes (Week 13 Day 5: the read API):
+Read routes (Week 13 Day 5):
     GET /health                                  is the API up, can it reach the database?
     GET /transactions                            list, filtered and paginated
     GET /transactions/{transaction_id}/journey   one transaction's steps and score breakdown
     GET /insights                                risk summary for the compliance team
+    GET /alerts                                  alerts for high-risk transactions
+
+Write routes (Week 14 Day 1):
+    POST /upload    accept a CSV file; answers 202 at once, processing continues in the background
+    POST /flag      flag an account for review (calls the flag_account database function)
+    POST /resolve   mark an alert as resolved
 
 This Lambda runs INSIDE the VPC: it reads the ledger in RDS as the database
 user fintrust_query, and the event store in DynamoDB through the gateway
@@ -25,20 +31,40 @@ Rules followed on every route:
       goes to the logs, never to the caller.
 """
 
+import base64
 import json
+import re
 import time
+import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from fintrust import __version__, config, db, dynamo
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+
+from fintrust import __version__, config, db, dynamo, validators
 from fintrust.log import get_logger
 from fintrust.validators import ACCOUNT_ID_PATTERN, TRANSACTION_ID_PATTERN, mask_account
 
 logger = get_logger("query")
 
 RISK_LEVELS = ("LOW", "MEDIUM", "HIGH")
+ALERT_STATUSES = ("OPEN", "RESOLVED")
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
 SAST = timezone(timedelta(hours=2))     # dates in the API are South African calendar days
+
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024      # Lambda accepts at most 6 MB in one request
+MAX_REASON_LENGTH = 500
+FILENAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+USER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,59}$")
+
+# PostgreSQL error codes raised on purpose by the flag_account function.
+ACCOUNT_NOT_FOUND = "P0002"             # no_data_found
+ACCOUNT_CLOSED = "55000"                # object_not_in_prerequisite_state
+
+# Module level: created once per Lambda container. Reaches S3 through the VPC's
+# gateway endpoint.
+_s3 = boto3.client("s3", region_name=config.region())
 
 
 class ApiError(Exception):
@@ -112,6 +138,42 @@ def _period(params):
 
 def _where(conditions):
     return ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+
+def _raw_body(event):
+    """The request body as bytes (API Gateway may deliver it base64-encoded)."""
+    body = event.get("body") or ""
+    if event.get("isBase64Encoded"):
+        try:
+            return base64.b64decode(body, validate=True)
+        except ValueError:
+            raise ApiError(400, "VALIDATION_ERROR", "The request body is not valid base64") from None
+    return body.encode("utf-8")
+
+
+def _json_body(event):
+    """The request body as a dict, or a 400."""
+    try:
+        data = json.loads(_raw_body(event).decode("utf-8") or "null")
+    except (ValueError, UnicodeDecodeError):
+        raise ApiError(400, "VALIDATION_ERROR", "The request body must be valid JSON") from None
+    if not isinstance(data, dict):
+        raise ApiError(400, "VALIDATION_ERROR", "The request body must be a JSON object")
+    return data
+
+
+def _text_field(data, name, max_length, required=True):
+    """A cleaned free-text field from a JSON body (control characters removed,
+    personal identifiers redacted), or a 400."""
+    value = data.get(name)
+    if value is not None and not isinstance(value, str):
+        raise ApiError(400, "VALIDATION_ERROR", f"{name} must be text")
+    if value is not None and len(value) > max_length:
+        raise ApiError(400, "VALIDATION_ERROR", f"{name} must be at most {max_length} characters")
+    clean, _warnings = validators.sanitise_text(value, name, max_length)
+    if required and not clean:
+        raise ApiError(400, "VALIDATION_ERROR", f"{name} is required")
+    return clean
 
 
 # ----------------------------------------------------------------------------
@@ -302,11 +364,159 @@ def get_insights(event):
     })
 
 
+def get_alerts(event):
+    params = event.get("queryStringParameters") or {}
+    conditions, values = [], []
+    status = (params.get("status") or "").strip().upper()
+    if status:
+        if status not in ALERT_STATUSES:
+            raise ApiError(400, "VALIDATION_ERROR", f"status must be one of {', '.join(ALERT_STATUSES)}")
+        conditions.append("a.status = %s")
+        values.append(status)
+    limit = _integer(params, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT)
+    offset = _integer(params, "offset", 0, 0, 1_000_000)
+    where = _where(conditions)
+
+    with db.transaction() as cursor:
+        cursor.execute(f"SELECT count(*) AS total FROM alerts a {where}", values)
+        total = cursor.fetchone()["total"]
+        cursor.execute(
+            f"""
+            SELECT a.alert_id, a.status, a.created_at, a.resolved_at, a.resolved_by, a.resolution_note,
+                   t.transaction_id, t.account_id, t.tx_date, t.amount, t.currency, t.country_code,
+                   t.risk_score, t.risk_level
+            FROM alerts a
+            JOIN transactions t ON t.transaction_id = a.transaction_id
+            {where}
+            ORDER BY a.created_at DESC, a.alert_id DESC
+            LIMIT %s OFFSET %s
+            """,
+            [*values, limit, offset],
+        )
+        items = [dict(row) for row in cursor.fetchall()]
+
+    return respond(200, {
+        "items": items,
+        "pagination": {"limit": limit, "offset": offset, "total": total, "has_more": offset + len(items) < total},
+    })
+
+
+def post_upload(event):
+    """Accept a CSV file and return 202 immediately.
+
+    The file is stored in the raw bucket. S3 then invokes the ingest Lambda
+    ASYNCHRONOUSLY (the "Event" invocation type): this function does not wait
+    for the file to be processed, so the caller gets an answer in milliseconds
+    however large the file is. Progress is visible through the journey route.
+    """
+    body = _raw_body(event)
+    if not body.strip():
+        raise ApiError(400, "VALIDATION_ERROR", "The request body is empty; send the CSV file as the body")
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise ApiError(413, "PAYLOAD_TOO_LARGE", "The file is larger than 5 MB; split it into smaller files")
+    try:
+        first_line = body.decode("utf-8-sig").splitlines()[0]
+    except UnicodeDecodeError:
+        raise ApiError(400, "VALIDATION_ERROR", "The file must be UTF-8 text") from None
+    problems = validators.validate_header(first_line.split(","))
+    if problems:
+        raise ApiError(400, "VALIDATION_ERROR", "The first line must be the CSV header: " + "; ".join(problems))
+
+    params = event.get("queryStringParameters") or {}
+    filename = (params.get("filename") or "upload.csv").strip()
+    if not FILENAME_PATTERN.match(filename):
+        raise ApiError(400, "VALIDATION_ERROR",
+                       "filename may contain only letters, digits, dots, dashes and underscores")
+    if not filename.lower().endswith(".csv"):
+        filename += ".csv"
+
+    upload_id = str(uuid.uuid4())
+    # The key is built here, never taken from the caller, so a request cannot
+    # overwrite another file or write outside the uploads/ prefix.
+    key = f"uploads/{datetime.now(SAST):%Y-%m-%d}/{upload_id[:8]}-{filename}"
+    try:
+        _s3.put_object(Bucket=config.get("raw_bucket"), Key=key, Body=body, ContentType="text/csv")
+    except (ClientError, BotoCoreError) as error:
+        logger.error("upload_store_failed", error=str(error))
+        raise ApiError(503, "SERVICE_UNAVAILABLE", "The file could not be stored. Try again shortly.") from error
+
+    logger.info("upload_accepted", upload_id=upload_id, object_key=key, size_bytes=len(body))
+    return respond(202, {
+        "status": "ACCEPTED",
+        "upload_id": upload_id,
+        "object_key": key,
+        "message": "File accepted. Transactions will appear as they are processed.",
+    })
+
+
+def post_flag(event):
+    data = _json_body(event)
+    account_id = str(data.get("account_id") or "").strip().upper()
+    if not ACCOUNT_ID_PATTERN.match(account_id):
+        raise ApiError(400, "VALIDATION_ERROR", "account_id must look like ACC-1234")
+    reason = _text_field(data, "reason", MAX_REASON_LENGTH)
+
+    try:
+        # One call, one database transaction: the risk event and the status
+        # change happen together inside the flag_account function.
+        row = db.fetch_one("SELECT flag_account(%s, %s) AS risk_event_id", (account_id, reason))
+    except db.DatabaseError as error:
+        if error.pgcode == ACCOUNT_NOT_FOUND:
+            raise ApiError(404, "NOT_FOUND", f"Account {account_id} does not exist") from error
+        if error.pgcode == ACCOUNT_CLOSED:
+            raise ApiError(409, "CONFLICT", f"Account {account_id} is closed and cannot be flagged") from error
+        raise
+
+    logger.info("account_flagged", account=mask_account(account_id), risk_event_id=row["risk_event_id"])
+    return respond(201, {"risk_event_id": row["risk_event_id"], "account_id": account_id, "account_status": "FLAGGED"})
+
+
+def post_resolve(event):
+    data = _json_body(event)
+    alert_id = data.get("alert_id")
+    if isinstance(alert_id, bool) or not isinstance(alert_id, int) or alert_id < 1:
+        raise ApiError(400, "VALIDATION_ERROR", "alert_id must be a positive whole number")
+    resolved_by = str(data.get("resolved_by") or "").strip()
+    if not USER_PATTERN.match(resolved_by):
+        raise ApiError(400, "VALIDATION_ERROR",
+                       "resolved_by must be 2 to 60 letters, digits, dots, dashes or underscores")
+    note = _text_field(data, "resolution_note", MAX_REASON_LENGTH, required=False)
+
+    with db.transaction() as cursor:
+        # "AND status = 'OPEN'" makes this safe if two people resolve the same
+        # alert at once: only one UPDATE matches a row.
+        cursor.execute(
+            """
+            UPDATE alerts
+            SET status = 'RESOLVED', resolved_at = now(), resolved_by = %s, resolution_note = %s
+            WHERE alert_id = %s AND status = 'OPEN'
+            RETURNING alert_id, status, resolved_at, resolved_by
+            """,
+            (resolved_by, note, alert_id),
+        )
+        updated = cursor.fetchone()
+        if updated is None:
+            cursor.execute("SELECT status FROM alerts WHERE alert_id = %s", (alert_id,))
+            existing = cursor.fetchone()
+
+    if updated is None:
+        if existing is None:
+            raise ApiError(404, "NOT_FOUND", f"No alert with id {alert_id}")
+        raise ApiError(409, "CONFLICT", f"Alert {alert_id} is already resolved")
+
+    logger.info("alert_resolved", alert_id=alert_id, resolved_by=resolved_by)
+    return respond(200, dict(updated))
+
+
 ROUTES = {
     ("GET", "/health"): get_health,
     ("GET", "/transactions"): get_transactions,
     ("GET", "/transactions/{transaction_id}/journey"): get_journey,
     ("GET", "/insights"): get_insights,
+    ("GET", "/alerts"): get_alerts,
+    ("POST", "/upload"): post_upload,
+    ("POST", "/flag"): post_flag,
+    ("POST", "/resolve"): post_resolve,
 }
 
 
