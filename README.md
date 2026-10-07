@@ -32,8 +32,8 @@ It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is 
 | Week 14 Day 1 | Write API and Alert System | Done |
 | Week 14 Day 2 | CloudWatch Monitoring and Observability | Done |
 | Week 14 Day 3 | Automated Testing | Done |
-| Week 14 Day 4 | SQL Analytics and Reporting Layer | Next |
-| Week 14 Day 5 | End-to-End Integration and Submission | |
+| Week 14 Day 4 | SQL Analytics and Reporting Layer, and the web dashboard | Done |
+| Week 14 Day 5 | End-to-End Integration and Submission | Next |
 
 Progress and evidence for each phase are recorded in [docs/build-log.md](docs/build-log.md).
 
@@ -49,6 +49,7 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 | [ERD](docs/erd.md) | Database tables and relationships |
 | [SQL](sql/) | `schema.sql`, `functions.sql`, `views.sql`, `db_users.sql`, `seed.sql`, `risk_report.sql`, `monthly_summary.sql` |
 | [SQL analytics and the monthly report](docs/sql-analytics.md) | The window function, CTE report and views explained, with the running balance checked by hand |
+| [The web dashboard](docs/dashboard.md) | What each screen does, how it is hosted, and how it is secured |
 | [Testing and CI/CD](docs/testing.md) | The three test layers, fixtures, what each file covers, the CI pipeline |
 | [Monitoring](docs/monitoring.md) | Metrics, alarms and what to do when one fires, dashboard, tracing |
 | [Logs Insights queries](docs/logs-insights-queries.md) | Ready-made queries for the structured logs |
@@ -92,7 +93,7 @@ docker compose down
 
 Without a database those tests are skipped, not failed.
 
-There are 810 tests (640 unit, 170 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
+There are 861 tests (684 unit, 177 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
 
 ## Deploy to AWS
 
@@ -262,6 +263,23 @@ aws lambda invoke --function-name fintrust-capstone-report --cli-binary-format r
     --payload '{"month": "2026-09"}' /dev/stdout
 aws s3 ls s3://fintrust-capstone-reports-$(aws sts get-caller-identity --query Account --output text)/monthly/ --recursive
 ```
+
+### Step 9: the web dashboard (Week 14 Day 4)
+
+The database must be running. The first run takes 5 to 15 minutes while CloudFront rolls out.
+
+```bash
+./infrastructure/frontend/deploy_frontend.sh             # private bucket, CloudFront, files, CORS, API redeploy
+python scripts/verify_dashboard.py                       # hosting, security headers and CORS checks
+```
+
+The script prints the dashboard's address. To sign in, copy the API key without showing it on screen:
+
+```bash
+source ./scripts/api_env.sh && printf '%s' "$API_KEY" | pbcopy
+```
+
+After changing a file in `frontend/`, run `deploy_frontend.sh` again.
 
 ## Sample data
 

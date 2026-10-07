@@ -108,6 +108,18 @@ The bucket policy uses `"Action": "s3:*"` in a **Deny** statement (refuse anythi
 | Nolwazi | AWS | IAM user with MFA; root user is used for billing settings only |
 | Nolwazi | PostgreSQL | Master user through an SSH tunnel via EC2 Instance Connect Endpoint; no public IP, no open inbound port |
 
+## The web dashboard
+
+| Control | How |
+|---|---|
+| Files are not public in S3 | All public access blocked; CloudFront reads the bucket through origin access control; the bucket policy names the one distribution |
+| HTTPS only | CloudFront redirects http to https; HSTS header |
+| The API key is never stored | Typed in by the user; kept in the browser tab's session only |
+| Script injection | No HTML is built from data; a strict Content-Security-Policy allows only the page's own script and only this API |
+| Other websites cannot use the API through a visitor's browser | CORS allows the dashboard's address only, on Lambda responses and on API Gateway's own error responses |
+
+Details are in [dashboard.md](dashboard.md).
+
 ## Logging, monitoring and audit
 
 - Structured JSON logs from every Lambda, 30-day retention.
