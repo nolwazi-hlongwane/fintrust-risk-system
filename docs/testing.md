@@ -11,9 +11,9 @@ Every change is checked automatically before it can reach the `develop` or `main
 
 | Layer | What it runs against | When | Tests | What it proves |
 |---|---|---|---|---|
-| **Unit** (`tests/unit`) | moto (a simulated AWS, in memory) | Every push, any branch | 640 | Each module does its own job: validation rules, scoring rules, error handling, email content, API responses, IAM policies |
-| **Integration** (`tests/integration`) | moto and a real PostgreSQL 16 | `develop` branch only | 170 | The modules work together and the SQL is right: constraints, rollback, permissions per database user, and the whole pipeline end to end |
-| **Live verification** (`scripts/verify_*.py`) | The real AWS account | By hand, after each deployment | 6 scripts | The deployed system works: real IAM, real network, real email |
+| **Unit** (`tests/unit`) | moto (a simulated AWS, in memory) | Every push, any branch | 684 | Each module does its own job: validation rules, scoring rules, error handling, email content, API responses, IAM policies |
+| **Integration** (`tests/integration`) | moto and a real PostgreSQL 16 | `develop` branch only | 177 | The modules work together and the SQL is right: constraints, rollback, permissions per database user, and the whole pipeline end to end |
+| **Live verification** (`scripts/verify_*.py`) | The real AWS account | By hand, after each deployment | 7 scripts | The deployed system works: real IAM, real network, real email |
 
 Coverage of the application code (`fintrust/`) is 99% with all tests, 96% with unit tests alone.
 
@@ -50,7 +50,7 @@ A fixture is setup code that pytest runs for any test that asks for it by name.
 | `unit/test_ingest.py` | 44 | File handling, quarantine, queue batches, journey events, retries |
 | `unit/test_score.py` | 21 | Batch handling: partial failures, per-account ordering, redelivery |
 | `unit/test_alert.py` | 24 | Email content, masking, one email per transaction, SES failure |
-| `unit/test_query.py`, `test_query_write.py` | 99 | Every route: validation, status codes, error shape, SQL injection attempts |
+| `unit/test_query.py`, `test_query_write.py`, `test_query_cors_accounts.py` | 120 | Every route: validation, status codes, error shape, SQL injection attempts |
 | `unit/test_db.py` | 23 | Connection reuse; rollback on every error path |
 | `unit/test_dynamo.py` | 29 | Keys, journey order, pagination, error wrapping |
 | `unit/test_config.py`, `test_log.py`, `test_models.py`, `test_metrics.py` | 72 | Settings, JSON logs, data classes, metric lines |
@@ -58,12 +58,13 @@ A fixture is setup code that pytest runs for any test that asks for it by name.
 | `unit/test_failure_paths.py` | 9 | Failures at awkward moments, such as an audit write failing after the real work succeeded |
 | `unit/test_iam_policies.py` | 97 | No wildcard actions; every role limited to its own resources |
 | `unit/test_storage_config.py`, `test_monitoring_config.py` | 45 | Lifecycle rules match the retention policy; alarms and dashboard use real metric names; Free Tier limits |
+| `unit/test_frontend.py` | 23 | The dashboard's files: no key or mock data, no HTML built from data, strict Content-Security-Policy, private hosting |
 | `unit/test_repo_hygiene.py` | 22 | No keys or passwords committed; dependencies pinned; clients at module level; scripts valid |
 | `integration/test_schema.py` | 46 | Every constraint, index and foreign key rejects bad data |
 | `integration/test_erd_matches_schema.py` | 7 | The ERD document matches the deployed tables exactly |
 | `integration/test_db_integration.py` | 12 | Rollback and reconnect against a real database |
 | `integration/test_score_integration.py` | 18 | Scores, velocity window, atomic writes, break and recover |
-| `integration/test_query_integration.py`, `test_write_api_integration.py` | 47 | API SQL against seed data; `flag_account`; database permissions |
+| `integration/test_query_integration.py`, `test_write_api_integration.py` | 54 | API SQL against seed data; `flag_account`; database permissions |
 | `integration/test_sql_analytics.py` | 24 | Running balance and risk report checked against plain-Python recalculation; window boundaries; views; permissions |
 | `integration/test_report_integration.py` | 9 | The report Lambda end to end on seed data: totals, balances chaining month to month, no customer details |
 | `integration/test_pipeline.py` | 7 | The whole pipeline in one process, including the dead-letter queue |

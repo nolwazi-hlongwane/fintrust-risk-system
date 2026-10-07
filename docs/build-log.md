@@ -610,3 +610,68 @@ This completes the brief's six SQL artefacts and the tenth Python module.
 | Rubric C1: every Lambda role least-privilege | Met for all five |
 
 **Open items carried forward:** the web dashboard, CloudFront hosting and tightening CORS (Week 14 Day 4 part 2); end-to-end script, dead-letter run on the real account, Well-Architected review and final audit (Week 14 Day 5).
+
+---
+
+## Week 14 Day 4 (part 2): The Web Dashboard
+
+**Built on:** Wednesday 7 October 2026 (brief slot: Week 14 Day 4, Thursday 8 October 2026)
+**Branch:** `feature/w14d4-dashboard`
+
+The brief describes a backend system. A web dashboard was confirmed as a welcome addition, and the Project Plan lists a functional HTML, CSS and JavaScript frontend connected to the real APIs.
+
+### What was built
+
+| Item | Where |
+|---|---|
+| Dashboard: overview, transaction search, alerts with resolve, accounts with flag, CSV upload with live progress, and the journey panel | `frontend/index.html`, `styles.css`, `app.js` |
+| New route `GET /accounts`, reading the `v_risk_dashboard` view | `fintrust/query.py`, `infrastructure/apigateway/openapi.json` |
+| Journey route now explains transactions loaded as opening data, from the ledger | `fintrust/query.py` |
+| CORS limited to the dashboard's address, on Lambda responses and on API Gateway's own errors | `fintrust/query.py`, `infrastructure/apigateway/deploy_api.sh` |
+| Private S3 bucket, CloudFront distribution with origin access control, security headers policy | `infrastructure/frontend/` |
+| Dashboard guide | `docs/dashboard.md` |
+| Live verification | `scripts/verify_dashboard.py` |
+
+### Key decisions
+
+1. **Plain HTML, CSS and JavaScript, with no framework and no third-party code.** There is nothing to build or patch, every line can be explained, and the Content-Security-Policy can forbid everything except the page's own files.
+2. **The API key is typed in, never stored.** It lives in the browser tab's session only. The address of the API is written into `config.js` at deploy time; it is not a secret.
+3. **Private bucket behind CloudFront, not an S3 website.** An S3 website needs a public bucket and has no HTTPS of its own. With origin access control the bucket stays fully private and the bucket policy names the one distribution allowed to read it.
+4. **CORS allows one address.** Before the dashboard existed the API answered `*`. Now it answers only the dashboard's address, including on errors produced by API Gateway itself, which never reach the Lambda.
+5. **No HTML is ever built from data.** Text from the API goes on the page as text. A merchant name containing a script tag is displayed, not run. Tests fail the build if `innerHTML` appears.
+6. **The view built in part 1 has a real user.** `GET /accounts` reads `v_risk_dashboard`, so the API does not repeat the joins and returns no customer details.
+7. **Every transaction can be explained.** The three months of seed history never passed through the pipeline, so DynamoDB has no journey for it. The journey route falls back to the ledger's `risk_events` rows, so the "why this score" panel works for every row.
+8. **Live progress is polite to the API.** After an upload the page follows 12 transactions, one request at a time every four seconds, to stay inside the usage plan's limit.
+9. **The dashboard bucket uses SSE-S3, not the project KMS key.** The files are public web pages with no data; using the project key would mean granting CloudFront rights on it for no benefit.
+
+### Test results
+
+- `pytest`: 861 tests (684 unit, 177 integration). 860 pass locally; 1 is skipped locally (it needs the CI database's password login).
+- Coverage of `fintrust/`: 99% with the whole suite, 96% with unit tests alone. `query.py` is 100% covered.
+- The dashboard was driven in a real browser (Chromium) against the real handlers, a real PostgreSQL and a simulated AWS, under the same Content-Security-Policy that CloudFront applies: connect with a wrong and a right key, search, open a journey, resolve an alert, flag an account, upload a file and watch 12 transactions finish, including one in the dead-letter queue. No script or policy errors were reported, on desktop and phone widths.
+- The hosting script was run against a local AWS simulator, except the security headers policy, which the simulator does not support; that request and the distribution settings were checked against the AWS service definition instead. CloudFront serving the site, the headers, and CORS from a real browser are first proven on the real account by `verify_dashboard.py` and by using the dashboard.
+
+### Evidence to capture (save in `docs/evidence/`)
+
+- [ ] `w14d4-verify-dashboard.png`: terminal output of `python scripts/verify_dashboard.py` ending in "23 of 23 checks passed"
+- [ ] `w14d4-dashboard-overview.png`: the dashboard's Overview, with the CloudFront address visible in the browser's address bar
+- [ ] `w14d4-dashboard-transactions.png`: Transactions, filtered to High
+- [ ] `w14d4-dashboard-journey.png`: the journey panel for a transaction uploaded through the pipeline, showing the score breakdown and the steps
+- [ ] `w14d4-dashboard-alerts.png`: Alerts, with at least one open alert
+- [ ] `w14d4-dashboard-accounts.png`: Accounts
+- [ ] `w14d4-dashboard-upload.png`: Upload a file, after a file has finished, showing the progress table
+- [ ] `w14d4-cloudfront-distribution.png`: CloudFront console, the distribution, showing status Enabled and the S3 origin with origin access control
+- [ ] `w14d4-s3-dashboard-private.png`: S3 console, the dashboard bucket, Permissions tab, showing "Block all public access: On" and the bucket policy
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Project Plan: functional HTML, CSS and JavaScript frontend connected to the real APIs | Met |
+| Transaction search, risk insights, alerts and CSV upload | Met, plus accounts and the journey panel |
+| No mock functionality | Met (a test checks the script holds no sample data) |
+| Demo: "uploads a CSV ... then queries the API" | Can be done from the dashboard as well as from `curl` |
+| Rubric C1: security boundaries | Private bucket, origin access control, HTTPS only, CORS to one address |
+| Brief: API key authentication on every route | Unchanged; the browser preflight is the only request without a key, and it returns headers only |
+
+**Open items carried forward:** Week 14 Day 5: end-to-end script, dead-letter break-and-recover on the real account (now watchable on the dashboard), Well-Architected self-assessment, draw.io diagrams as PDF, final rubric audit, billing evidence, merge to `main`, make the repository public.

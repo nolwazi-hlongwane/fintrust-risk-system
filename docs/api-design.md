@@ -1,7 +1,7 @@
 # API Design
 
 **Brief slot:** Week 13 Day 1: Design Kickoff (specification). Read routes built in Week 13 Day 5; `/alerts` and the write routes in Week 14 Day 1.
-**Status:** all eight routes are deployed (read routes in Week 13 Day 5; `/alerts`, `/upload`, `/flag` and `/resolve` in Week 14 Day 1). The machine-readable definition is `infrastructure/apigateway/openapi.json` (OpenAPI 3), which is what API Gateway is built from.
+**Status:** all nine routes are deployed (read routes in Week 13 Day 5; `/alerts`, `/upload`, `/flag` and `/resolve` in Week 14 Day 1; `/accounts` in Week 14 Day 4). The machine-readable definition is `infrastructure/apigateway/openapi.json` (OpenAPI 3), which is what API Gateway is built from.
 
 ## Overview
 
@@ -31,6 +31,7 @@ The key is never stored in the repository or in the dashboard's code. The dashbo
 | GET | `/transactions/{transaction_id}/journey` | Timeline and score breakdown for one transaction | 200 |
 | GET | `/insights` | Risk summary for the compliance team | 200 |
 | GET | `/alerts` | List alerts | 200 |
+| GET | `/accounts` | List accounts ranked by risk | 200 |
 | POST | `/upload` | Submit a CSV file for processing | 202 |
 | POST | `/flag` | Flag an account for review | 201 |
 | POST | `/resolve` | Mark an alert as resolved | 200 |
@@ -80,12 +81,13 @@ Amounts are returned as text so no precision is lost.
 
 ### GET /transactions/{transaction_id}/journey
 
-Read from the DynamoDB event store.
+Read from the DynamoDB event store (`"source": "event_store"`). A transaction that was loaded as opening data never passed through the pipeline and has no events; for those the score and the rules that fired are read from the ledger in RDS instead (`"source": "ledger"`, `"events": []`). `404` only if the transaction is in neither.
 
 ```json
 {
   "transaction_id": "TXN-20260915-000123",
   "account_id": "ACC-1007",
+  "source": "event_store",
   "status": "SCORED",
   "score": {
     "risk_score": 70,
@@ -151,6 +153,40 @@ Returns `items` and `pagination` in the same shape as `/transactions`, newest al
   "country_code": "AE",
   "risk_score": 70,
   "risk_level": "HIGH"
+}
+```
+
+### GET /accounts
+
+Reads the `v_risk_dashboard` view, highest total risk points first. The view holds no customer names or contact details.
+
+| Query parameter | Required | Rule |
+|---|---|---|
+| `status` | no | `ACTIVE`, `FLAGGED` or `CLOSED` |
+| `limit`, `offset` | no | As for `/transactions` |
+
+```json
+{
+  "items": [
+    {
+      "account_id": "ACC-1007",
+      "account_type": "BUSINESS",
+      "account_status": "FLAGGED",
+      "transaction_count": 31,
+      "total_credits": "955800.00",
+      "total_debits": "567380.72",
+      "high_risk_count": 5,
+      "medium_risk_count": 4,
+      "highest_risk_score": 70,
+      "total_risk_points": 550,
+      "last_transaction_at": "2026-09-30 11:46:11+00:00",
+      "last_high_risk_at": "2026-09-15 13:15:00+00:00",
+      "open_alerts": 1,
+      "resolved_alerts": 4,
+      "manual_flags": 1
+    }
+  ],
+  "pagination": { "limit": 25, "offset": 0, "total": 12, "has_more": false }
 }
 ```
 
@@ -229,3 +265,15 @@ Every error produced by the Lambda has the same shape:
 ## Cross-origin access (CORS)
 
 The API allows browser calls only from the dashboard's CloudFront address, with headers `content-type` and `x-api-key`.
+
+How it works:
+
+1. The setting `cors_allowed_origin` in SSM holds the dashboard's address. `deploy_frontend.sh` writes it.
+2. A browser sends the page's address in the `Origin` header. If it is on the list, the Lambda returns it in `Access-Control-Allow-Origin`, and the browser lets the page read the response.
+3. For any other origin the Lambda returns the dashboard's address, which does not match the caller's, so that browser refuses to hand over the response.
+4. Errors produced by API Gateway itself (a missing key, a throttled request) never reach the Lambda, so the same address is set on the gateway's default 4xx and 5xx responses when the API is deployed.
+5. `OPTIONS` preflight requests need no API key (a browser cannot attach one) and return only the CORS headers.
+
+Every response also carries `Vary: Origin`, so a cache cannot reuse one site's answer for another.
+
+CORS protects users' browsers from other websites. It is not authentication: `curl` ignores it, which is why every route still requires the API key.
