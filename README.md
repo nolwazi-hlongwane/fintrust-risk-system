@@ -31,8 +31,8 @@ It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is 
 | Week 13 Day 5 | API Backend Part 1 | Done |
 | Week 14 Day 1 | Write API and Alert System | Done |
 | Week 14 Day 2 | CloudWatch Monitoring and Observability | Done |
-| Week 14 Day 3 | Automated Testing | Next |
-| Week 14 Day 4 | SQL Analytics and Reporting Layer | |
+| Week 14 Day 3 | Automated Testing | Done |
+| Week 14 Day 4 | SQL Analytics and Reporting Layer | Next |
 | Week 14 Day 5 | End-to-End Integration and Submission | |
 
 Progress and evidence for each phase are recorded in [docs/build-log.md](docs/build-log.md).
@@ -48,6 +48,7 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 | [Data management design](docs/data-governance.md) | POPIA, data quality, retention, migration, risk register |
 | [ERD](docs/erd.md) | Database tables and relationships |
 | [SQL](sql/) | `schema.sql`, `functions.sql`, `db_users.sql`, `seed.sql` |
+| [Testing and CI/CD](docs/testing.md) | The three test layers, fixtures, what each file covers, the CI pipeline |
 | [Monitoring](docs/monitoring.md) | Metrics, alarms and what to do when one fires, dashboard, tracing |
 | [Logs Insights queries](docs/logs-insights-queries.md) | Ready-made queries for the structured logs |
 | [Build log](docs/build-log.md) | What was built in each phase, with test results |
@@ -89,6 +90,8 @@ docker compose down
 ```
 
 Without a database those tests are skipped, not failed.
+
+There are 738 tests (601 unit, 137 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
 
 ## Deploy to AWS
 
