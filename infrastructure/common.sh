@@ -29,7 +29,9 @@ render() {
       -e "s|__PREFIX__|${PREFIX}|g" \
       -e "s|__ENV__|${FINTRUST_ENV}|g" \
       -e "s|__DBI_RESOURCE_ID__|${DBI_RESOURCE_ID:-__DBI_RESOURCE_ID__}|g" \
-      -e "s|__KMS_KEY_ARN__|${KMS_KEY_ARN:-__KMS_KEY_ARN__}|g" "$1"
+      -e "s|__KMS_KEY_ARN__|${KMS_KEY_ARN:-__KMS_KEY_ARN__}|g" \
+      -e "s|__ALERT_SENDER__|${ALERT_SENDER:-__ALERT_SENDER__}|g" \
+      -e "s|__ALERT_RECIPIENT__|${ALERT_RECIPIENT:-__ALERT_RECIPIENT__}|g" "$1"
 }
 
 # ---- names shared by several scripts ----------------------------------------
@@ -45,6 +47,7 @@ export BUCKETS="raw processed quarantine reports"
 export QUEUE_NAME="${PREFIX}-transactions.fifo"          # ingest -> score, ordered per account
 export DLQ_NAME="${PREFIX}-transactions-dlq.fifo"        # messages that failed scoring 3 times
 export INGEST_DLQ_NAME="${PREFIX}-ingest-dlq"            # S3 events the ingest Lambda could not process
+export ALERT_DLQ_NAME="${PREFIX}-alert-dlq"              # alert emails that could not be sent after retries
 
 bucket_name() {   # bucket_name raw  ->  fintrust-capstone-raw-<account id>
   echo "${PREFIX}-$1-${ACCOUNT_ID}"   # the account id makes the name globally unique

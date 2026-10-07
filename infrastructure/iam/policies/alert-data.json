@@ -1,0 +1,60 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadScoreStream",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator",
+        "dynamodb:DescribeStream"
+      ],
+      "Resource": "arn:aws:dynamodb:__REGION__:__ACCOUNT_ID__:table/__PREFIX__-events/stream/*"
+    },
+    {
+      "Sid": "ListTableStreams",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:ListStreams"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadAndWriteAlertMarkersAndJourney",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem"
+      ],
+      "Resource": "arn:aws:dynamodb:__REGION__:__ACCOUNT_ID__:table/__PREFIX__-events"
+    },
+    {
+      "Sid": "SendAlertEmailBetweenVerifiedAddressesOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ses:SendEmail"
+      ],
+      "Resource": [
+        "arn:aws:ses:__REGION__:__ACCOUNT_ID__:identity/__ALERT_SENDER__",
+        "arn:aws:ses:__REGION__:__ACCOUNT_ID__:identity/__ALERT_RECIPIENT__"
+      ]
+    },
+    {
+      "Sid": "SendUndeliveredAlertsToAlertDlq",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage"
+      ],
+      "Resource": "arn:aws:sqs:__REGION__:__ACCOUNT_ID__:__PREFIX__-alert-dlq"
+    },
+    {
+      "Sid": "EncryptAlertDlqMessages",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "__KMS_KEY_ARN__"
+    }
+  ]
+}
