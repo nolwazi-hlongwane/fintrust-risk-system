@@ -38,8 +38,12 @@ def erd_entities():
 def database_entities(admin):
     with admin.cursor() as cursor:
         cursor.execute("""
-            SELECT table_name, column_name, udt_name FROM information_schema.columns
-            WHERE table_schema = 'public' ORDER BY table_name, ordinal_position
+            SELECT c.table_name, c.column_name, c.udt_name
+            FROM information_schema.columns c
+            JOIN information_schema.tables t
+              ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+            WHERE c.table_schema = 'public' AND t.table_type = 'BASE TABLE'   -- views are not entities
+            ORDER BY c.table_name, c.ordinal_position
         """)
         columns = cursor.fetchall()
         cursor.execute("""

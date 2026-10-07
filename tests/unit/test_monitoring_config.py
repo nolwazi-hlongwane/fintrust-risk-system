@@ -16,7 +16,7 @@ from fintrust import metrics
 ROOT = Path(__file__).resolve().parents[2]
 MONITORING = ROOT / "infrastructure" / "monitoring"
 NAMESPACE = "FinTrust/ETL"
-FUNCTIONS = {"ingest", "score", "alert", "query"}
+FUNCTIONS = {"ingest", "score", "alert", "query", "report"}
 
 
 def load(name):
@@ -116,7 +116,7 @@ class TestDashboard:
 class TestSavedQueries:
     def test_names_are_unique_and_functions_exist(self):
         queries = load("queries.json")
-        assert len({query["name"] for query in queries}) == len(queries) == 9
+        assert len({query["name"] for query in queries}) == len(queries) == 10
         for query in queries:
             assert set(query["functions"]) <= FUNCTIONS and query["functions"]
 
@@ -125,7 +125,7 @@ class TestSavedQueries:
         assert query["functions"] == ["ingest"]
         assert 'level = "ERROR"' in query["query"]
 
-    @pytest.mark.parametrize("query", load("queries.json"), ids=lambda q: q["name"][:1])
+    @pytest.mark.parametrize("query", load("queries.json"), ids=lambda q: q["name"].split(" ")[0])
     def test_every_saved_query_is_documented_word_for_word(self, query):
         document = (ROOT / "docs" / "logs-insights-queries.md").read_text()
         assert f"### {query['name']}" in document

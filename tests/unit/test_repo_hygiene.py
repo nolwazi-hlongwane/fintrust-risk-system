@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SKIP_DIRS = {".git", ".venv", "build", "__pycache__", ".pytest_cache", ".ruff_cache", "evidence", "node_modules"}
 TEXT_SUFFIXES = {".py", ".sh", ".sql", ".json", ".md", ".yml", ".yaml", ".toml", ".txt", ".csv", ".html", ".js", ".css"}
-LAMBDA_MODULES = ("ingest", "score", "alert", "query")
+LAMBDA_MODULES = ("ingest", "score", "alert", "query", "report")
 
 
 def project_files():
