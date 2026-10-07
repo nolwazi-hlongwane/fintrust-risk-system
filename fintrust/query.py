@@ -10,6 +10,7 @@ Read routes (Week 13 Day 5):
     GET /transactions/{transaction_id}/journey   one transaction's steps and score breakdown
     GET /insights                                risk summary for the compliance team
     GET /alerts                                  alerts for high-risk transactions
+    GET /accounts                                accounts ranked by risk (Week 14 Day 4)
 
 Write routes (Week 14 Day 1):
     POST /upload    accept a CSV file; answers 202 at once, processing continues in the background
@@ -89,6 +90,24 @@ def _headers():
         "Cache-Control": "no-store",            # responses contain financial data
         "X-Content-Type-Options": "nosniff",
     }
+
+
+def allowed_origin(event):
+    """CORS: which website may read this response in a browser.
+
+    The setting cors_allowed_origin is the dashboard's address (or several,
+    separated by commas). A browser sends the page's address in the Origin
+    header; if it is on the list it is echoed back, which is what permits the
+    page to read the response. Any other site gets the first allowed address
+    back, which does not match its own, so its browser refuses to hand over the
+    data. "*" (any site) is only the default before the dashboard is deployed.
+    """
+    allowed = [origin.strip() for origin in config.get("cors_allowed_origin").split(",") if origin.strip()]
+    if not allowed or "*" in allowed:
+        return "*"
+    headers = event.get("headers") or {}
+    origin = next((value for name, value in headers.items() if name.lower() == "origin"), None)
+    return origin if origin in allowed else allowed[0]
 
 
 def respond(status, body):
@@ -258,6 +277,37 @@ def journey_status(score, events):
     return "RECEIVED"
 
 
+def _ledger_score(transaction_id):
+    """A transaction's score and rule breakdown read from RDS, or None if it does not exist."""
+    with db.transaction() as cursor:
+        cursor.execute(
+            "SELECT account_id, risk_score, risk_level, created_at FROM transactions WHERE transaction_id = %s",
+            (transaction_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        cursor.execute(
+            "SELECT event_type, points, reason FROM risk_events WHERE transaction_id = %s "
+            "ORDER BY points DESC, event_type",
+            (transaction_id,),
+        )
+        rules = [{"rule": e["event_type"], "points": e["points"], "detail": e["reason"]} for e in cursor.fetchall()]
+    return {
+        "transaction_id": transaction_id,
+        "account_id": row["account_id"],
+        "source": "ledger",
+        "status": "SCORED",
+        "score": {
+            "risk_score": row["risk_score"],
+            "risk_level": row["risk_level"],
+            "rules": rules,
+            "scored_at": row["created_at"],
+        },
+        "events": [],
+    }
+
+
 def get_journey(event):
     transaction_id = ((event.get("pathParameters") or {}).get("transaction_id") or "").strip()
     if not TRANSACTION_ID_PATTERN.match(transaction_id):
@@ -266,12 +316,19 @@ def get_journey(event):
     journey = dynamo.get_journey(transaction_id)
     score, events = journey["score"], journey["events"]
     if not score and not events:
-        raise ApiError(404, "NOT_FOUND", f"No transaction with id {transaction_id}")
+        # Nothing in the event store. Transactions loaded as opening data (the
+        # migrated history) never passed through the pipeline, but the ledger
+        # still holds their score and the rules that fired.
+        from_ledger = _ledger_score(transaction_id)
+        if from_ledger is None:
+            raise ApiError(404, "NOT_FOUND", f"No transaction with id {transaction_id}")
+        return respond(200, from_ledger)
 
     account_id = (score or events[0])["account_id"]
     return respond(200, {
         "transaction_id": transaction_id,
         "account_id": account_id,
+        "source": "event_store",
         "status": journey_status(score, events),
         "score": {
             "risk_score": score["risk_score"],
@@ -361,6 +418,49 @@ def get_insights(event):
         "rules_fired": {rule: fired.get(rule, 0) for rule in ("HIGH_AMOUNT", "HIGH_VELOCITY", "CROSS_BORDER")},
         "open_alerts": open_alerts,
         "top_risk_accounts": top_accounts,
+    })
+
+
+ACCOUNT_STATUSES = ("ACTIVE", "FLAGGED", "CLOSED")
+
+
+def get_accounts(event):
+    """Accounts ranked by risk, read from the v_risk_dashboard view (sql/views.sql).
+
+    The view holds no customer names or contact details, and the API needs to
+    know nothing about the tables behind it.
+    """
+    params = event.get("queryStringParameters") or {}
+    conditions, values = [], []
+    status = (params.get("status") or "").strip().upper()
+    if status:
+        if status not in ACCOUNT_STATUSES:
+            raise ApiError(400, "VALIDATION_ERROR", f"status must be one of {', '.join(ACCOUNT_STATUSES)}")
+        conditions.append("account_status = %s")
+        values.append(status)
+    limit = _integer(params, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT)
+    offset = _integer(params, "offset", 0, 0, 1_000_000)
+    where = _where(conditions)
+
+    with db.transaction() as cursor:
+        cursor.execute(f"SELECT count(*) AS total FROM v_risk_dashboard {where}", values)
+        total = cursor.fetchone()["total"]
+        cursor.execute(
+            f"""
+            SELECT account_id, account_type, account_status, transaction_count, total_credits, total_debits,
+                   high_risk_count, medium_risk_count, highest_risk_score, total_risk_points,
+                   last_transaction_at, last_high_risk_at, open_alerts, resolved_alerts, manual_flags
+            FROM v_risk_dashboard {where}
+            ORDER BY total_risk_points DESC, account_id
+            LIMIT %s OFFSET %s
+            """,
+            [*values, limit, offset],
+        )
+        items = [dict(row) for row in cursor.fetchall()]
+
+    return respond(200, {
+        "items": items,
+        "pagination": {"limit": limit, "offset": offset, "total": total, "has_more": offset + len(items) < total},
     })
 
 
@@ -515,6 +615,7 @@ ROUTES = {
     ("GET", "/insights"): get_insights,
     ("GET", "/alerts"): get_alerts,
     ("POST", "/upload"): post_upload,
+    ("GET", "/accounts"): get_accounts,
     ("POST", "/flag"): post_flag,
     ("POST", "/resolve"): post_resolve,
 }
@@ -547,6 +648,10 @@ def handler(event, context):
         log.error("unhandled_error", error_type=type(error).__name__, error=str(error))
         response = error_response(500, "INTERNAL_ERROR", "Something went wrong. Quote the request_id to support.",
                                   request_id)
+
+    # Set here, in one place, so every response (success or error) carries it.
+    response["headers"]["Access-Control-Allow-Origin"] = allowed_origin(event)
+    response["headers"]["Vary"] = "Origin"      # a cache must not reuse one site's answer for another
 
     account = (event.get("queryStringParameters") or {}).get("account_id")
     log.info(

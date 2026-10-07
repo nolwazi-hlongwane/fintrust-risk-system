@@ -149,6 +149,50 @@ class TestInsights:
         assert body["top_risk_accounts"] == []
 
 
+class TestJourneyFromLedger:
+    def test_seed_transaction_has_its_rule_breakdown(self, events_table):
+        status, body = get("/transactions/{transaction_id}/journey", path={"transaction_id": "TXN-20260915-000225"})
+        assert status == 200 and body["source"] == "ledger"
+        assert (body["account_id"], body["score"]["risk_score"], body["score"]["risk_level"]) == ("ACC-1007", 70, "HIGH")
+        assert [(r["rule"], r["points"]) for r in body["score"]["rules"]] == [("HIGH_AMOUNT", 50), ("CROSS_BORDER", 20)]
+        assert sum(r["points"] for r in body["score"]["rules"]) == body["score"]["risk_score"]
+
+    def test_low_risk_seed_transaction_has_no_rules(self, events_table):
+        _, body = get("/transactions/{transaction_id}/journey", path={"transaction_id": "TXN-20260701-000005"})
+        assert body["score"]["risk_score"] == 0 and body["score"]["rules"] == []
+
+    def test_transaction_in_neither_store_is_404(self, events_table):
+        status, _ = get("/transactions/{transaction_id}/journey", path={"transaction_id": "TXN-NOPE-000001"})
+        assert status == 404
+
+
+class TestAccounts:
+    def test_accounts_are_ranked_by_total_risk_points(self):
+        status, body = get("/accounts")
+        assert status == 200 and body["pagination"]["total"] == 12
+        points = [item["total_risk_points"] for item in body["items"]]
+        assert points == sorted(points, reverse=True)
+        assert [item["account_id"] for item in body["items"][:2]] == ["ACC-1005", "ACC-1007"]
+
+    def test_row_carries_the_whole_risk_picture(self):
+        _, body = get("/accounts", {"status": "FLAGGED"})
+        assert [item["account_id"] for item in body["items"]] == ["ACC-1007"]
+        row = body["items"][0]
+        assert (row["high_risk_count"], row["transaction_count"], row["manual_flags"]) == (5, 31, 1)
+        assert row["open_alerts"] + row["resolved_alerts"] == 5
+        assert row["account_type"] == "BUSINESS"
+
+    def test_no_customer_details_are_returned(self):
+        _, body = get("/accounts", {"limit": "100"})
+        assert not {"customer_id", "full_name", "email", "phone_number"} & set(body["items"][0])
+
+    def test_paging(self):
+        _, first = get("/accounts", {"limit": "5"})
+        _, second = get("/accounts", {"limit": "5", "offset": "5"})
+        assert len(first["items"]) == 5 and first["pagination"]["has_more"] is True
+        assert not {i["account_id"] for i in first["items"]} & {i["account_id"] for i in second["items"]}
+
+
 class TestDatabasePermissions:
     def test_query_lambda_cannot_change_the_ledger(self):
         from fintrust import db
