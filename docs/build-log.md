@@ -476,3 +476,64 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 | Free Tier: 10 metrics, 10 alarms | 9 metrics, 8 alarms |
 
 **Open items carried forward:** the `report` Lambda joins the Lambda errors alarm and the dashboard when it is built (Week 14 Day 4); the dead-letter break-and-recover run on the real account, with the alarm firing and `redrive_dlq.sh` (Week 14 Day 5).
+
+---
+
+## Week 14 Day 3: Automated Testing
+
+**Built on:** Wednesday 7 October 2026 (brief slot: Week 14 Day 3, Wednesday 7 October 2026)
+**Branch:** `feature/w14d3-automated-testing`
+
+Tests were written with every module from Week 13 Day 1 onwards, so this phase completes the suite instead of starting it.
+
+### What was built
+
+| Item | Where |
+|---|---|
+| Whole-pipeline integration test: ingest, queue, score, alert and API together, on moto and a real PostgreSQL | `tests/integration/test_pipeline.py` |
+| Dead-letter queue tests using the real redrive policy: three failures, dead-lettered, fixed, redriven, scored | same file, `TestDeadLetterQueue` |
+| Tests for failure paths that happy-path tests never reach | `tests/unit/test_failure_paths.py` |
+| Repository checks: no secrets, pinned dependencies, module-level clients, valid scripts and JSON, CI scoping | `tests/unit/test_repo_hygiene.py` |
+| Reusable SES fixture moved into `conftest.py`; integration tests marked automatically | `tests/conftest.py` |
+| Coverage gates in CI (90% unit, 95% whole suite) and a coverage table in each run's summary | `.github/workflows/ci.yml` |
+| Testing guide | `docs/testing.md` |
+
+### Key decisions
+
+1. **Three layers, each for a different kind of mistake.** Unit tests on moto for logic; integration tests on a real PostgreSQL for SQL and for modules working together; hand-run scripts on the real account for IAM, networking and email.
+2. **The pipeline test replaces only AWS's "glue".** The four handlers are the real code. A small class moves events between them using the same rules AWS does: delete a message only if it was not reported as failed, pass only HIGH scores to the alert Lambda, and log in to the database as each Lambda's own user.
+3. **The dead-letter queue is tested with the real redrive policy.** The queue in the test has `maxReceiveCount` 3 and a dead-letter target, and SQS (in moto) moves the message. The test does not pretend the move happened.
+4. **CI fails on low coverage, not only on a failed test.** New code without tests cannot be merged unnoticed.
+5. **Integration tests cannot pass by being skipped.** `REQUIRE_POSTGRES=1` in CI turns a missing database into a failure.
+6. **No AWS credentials in GitHub.** Nothing in CI touches the real account. Real-account checks are run by hand and saved as evidence.
+7. **One unused defensive branch was removed** from `metrics.py` (a fallback that could never run). Two unreachable lines remain in `validators.py` as a guard and are documented.
+
+### Test results
+
+- `pytest`: 738 tests (601 unit, 137 integration). 737 pass locally; 1 is skipped locally because it needs password login, which the CI database provides.
+- Coverage of `fintrust/`: 99% with the whole suite (4 lines of 1,206 not run), 98% with unit tests alone.
+- `ruff check`: clean.
+
+### Evidence to capture (save in `docs/evidence/`)
+
+- [ ] `w14d3-pytest-local.png`: terminal, `pytest` with the database running, showing the final line with 738 passed
+- [ ] `w14d3-coverage.png`: terminal, the coverage table from `pytest --cov=fintrust --cov-report=term-missing`
+- [ ] `w14d3-ci-feature-branch.png`: GitHub, Actions, the run for the feature branch: unit job green, integration job skipped
+- [ ] `w14d3-ci-develop.png`: GitHub, Actions, the run on `develop` after the merge: both jobs green (a required screenshot in the brief)
+- [ ] `w14d3-ci-coverage-summary.png`: the same run's Summary page, showing the coverage table
+- [ ] `w14d3-dead-letter-tests.png`: terminal, `pytest -k "DeadLetter" -v` showing the four dead-letter tests passing
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Full pytest suite with moto `@mock_aws` fixtures | Met (`mock_aws` in the `aws` fixture, used by every AWS test) |
+| `conftest.py` with reusable S3 and DynamoDB setup | Met (`pipeline`, `events_table`, plus SSM, SES and PostgreSQL fixtures) |
+| GitHub Actions: unit tests on every push | Met |
+| Integration tests on the develop branch only | Met (and checked by a test) |
+| Rubric C4: unit and integration | Met |
+| Rubric C4: CI green on every push | Met so far; confirmed again by this phase's two screenshots |
+| Rubric C1: DLQ behaviour tested | Met in automated tests; the real-account run follows in Week 14 Day 5 |
+| Rubric C4: end-to-end run against the real system | Four verify scripts so far; the single `e2e_test.py` is Week 14 Day 5 |
+
+**Open items carried forward:** tests for `report.py` and the SQL analytics files (Week 14 Day 4, written with the code); `scripts/e2e_test.py` and the real-account dead-letter run (Week 14 Day 5).

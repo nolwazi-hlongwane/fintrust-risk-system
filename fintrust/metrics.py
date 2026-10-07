@@ -43,16 +43,12 @@ def build(values, now_ms=None):
     unknown = sorted(set(values) - set(METRICS))
     if unknown:
         raise ValueError(f"Unknown metric name(s): {', '.join(unknown)}")
-    try:
-        namespace = config.get("metrics_namespace")
-    except config.ConfigError:
-        namespace = config.DEFAULTS["metrics_namespace"]
     record = {
         "_aws": {
             "Timestamp": now_ms if now_ms is not None else int(time.time() * 1000),
             "CloudWatchMetrics": [
                 {
-                    "Namespace": namespace,
+                    "Namespace": config.get("metrics_namespace"),
                     "Dimensions": [[DIMENSION]],
                     "Metrics": [{"Name": name, "Unit": "Count"} for name in values],
                 }
