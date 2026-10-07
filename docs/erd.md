@@ -83,6 +83,18 @@ erDiagram
 
 Indexes: `transactions(account_id)`, `transactions(tx_date)`, `transactions(account_id, tx_date)`, `transactions(risk_level)`, `accounts(customer_id)`, `risk_events(account_id)`, `risk_events(transaction_id)`, `alerts(status)`.
 
+## Views and the stored function
+
+These are not entities, so they are not in the diagram. They are built on the five tables above.
+
+| Object | Kind | Built on | Purpose |
+|---|---|---|---|
+| `v_risk_dashboard` | View | `accounts`, `transactions`, `alerts`, `risk_events` | One row per account with its risk picture |
+| `v_open_alerts` | View | `alerts`, `transactions`, `accounts`, `risk_events` | The open alert work queue |
+| `flag_account(account_id, reason)` | Function | `accounts`, `risk_events` | Flags an account and records why, atomically |
+
+See [sql-analytics.md](sql-analytics.md).
+
 ## Relationship to DynamoDB
 
 RDS is the system of record. The DynamoDB table `fintrust-capstone-events` (partition key `account_id`, sort key `tx_timestamp`, whose value begins with the transaction time followed by the transaction id) holds a fast-lookup copy of each score with its rule breakdown, plus the processing journey of each transaction. It holds no customer details.

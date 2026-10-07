@@ -8,7 +8,7 @@ Log lines never contain customer names, contact details or free-text description
 
 ## How to run a saved query
 
-The nine queries below are saved in the account by `infrastructure/monitoring/deploy_monitoring.sh`.
+The ten queries below are saved in the account by `infrastructure/monitoring/deploy_monitoring.sh`.
 
 1. Open the CloudWatch console and choose **Logs Insights** in the left menu.
 2. On the right, open **Saved and sample queries** and expand the **FinTrust** folder.
@@ -111,7 +111,7 @@ filter level = "ERROR" or status >= 400
 
 Follows one transaction through every function by its id. Replace the placeholder text with a real transaction id.
 
-Log groups: `/aws/lambda/fintrust-capstone-ingest`, `/aws/lambda/fintrust-capstone-score`, `/aws/lambda/fintrust-capstone-alert`, `/aws/lambda/fintrust-capstone-query`
+Log groups: `/aws/lambda/fintrust-capstone-ingest`, `/aws/lambda/fintrust-capstone-score`, `/aws/lambda/fintrust-capstone-alert`, `/aws/lambda/fintrust-capstone-query`, `/aws/lambda/fintrust-capstone-report`
 
 ```
 fields @timestamp, service, level, message, attempt, risk_score, error
@@ -123,13 +123,26 @@ fields @timestamp, service, level, message, attempt, risk_score, error
 
 Everything that went wrong anywhere, newest first. This is the first query to run when an alarm fires.
 
-Log groups: `/aws/lambda/fintrust-capstone-ingest`, `/aws/lambda/fintrust-capstone-score`, `/aws/lambda/fintrust-capstone-alert`, `/aws/lambda/fintrust-capstone-query`
+Log groups: `/aws/lambda/fintrust-capstone-ingest`, `/aws/lambda/fintrust-capstone-score`, `/aws/lambda/fintrust-capstone-alert`, `/aws/lambda/fintrust-capstone-query`, `/aws/lambda/fintrust-capstone-report`
 
 ```
 fields @timestamp, service, message, transaction_id, source_key, error
 | filter level = "ERROR"
 | sort @timestamp desc
 | limit 100
+```
+
+### 10 Monthly reports written and failed
+
+One line per report run: the month, how many transactions and accounts it covered, and where the file was written. A `report_failed` line carries the reason.
+
+Log groups: `/aws/lambda/fintrust-capstone-report`
+
+```
+fields @timestamp, level, message, month, transactions, accounts, high_risk_accounts, json_key, error
+| filter message in ["report_written", "report_failed", "control_totals_disagree"]
+| sort @timestamp desc
+| limit 50
 ```
 
 ## More queries for the ingest Lambda

@@ -43,8 +43,8 @@ One row per Lambda function. "Base" permissions are deployed now; the rest are t
 | | `kms:GenerateDataKey` | The project key | Deployed W14 D1 |
 | **report** (`fintrust-capstone-report-role`) | Logs, X-Ray, network interfaces (as score) | Own log group | Deployed W13 D1 |
 | | `rds-db:connect` | Database user `fintrust_report` only | Deployed W13 D2 |
-| | `s3:PutObject` | Reports bucket objects | W14 D4 |
-| | `kms:GenerateDataKey` | The project key | W14 D4 |
+| | `s3:PutObject` | Reports bucket, `monthly/` prefix only | Deployed W14 D4 |
+| | `kms:GenerateDataKey` | The project key | Deployed W14 D4 |
 
 What no role can do: delete anything, read another function's logs, change IAM, create or modify infrastructure, or reach any resource outside the `fintrust-capstone-` prefix.
 
@@ -64,11 +64,13 @@ What no role can do: delete anything, read another function's logs, change IAM, 
 | Database user | Used by | Rights |
 |---|---|---|
 | `fintrust_score` | score Lambda | Insert into `transactions`, `risk_events`, `alerts`; read `accounts` and `transactions` |
-| `fintrust_query` | query Lambda | Read all tables and views; update `alerts`; execute `flag_account` |
-| `fintrust_report` | report Lambda | Read only |
+| `fintrust_query` | query Lambda | Read all tables and both views; update the four resolution columns of `alerts`; execute `flag_account` |
+| `fintrust_report` | report Lambda | Read only, and not the `customers` table: `accounts`, `transactions`, `risk_events`, `alerts` and both views |
 | master user | Nolwazi, through the tunnel only | Schema changes. Never used by a Lambda |
 
-So even if the report Lambda's code were compromised, both IAM and the database would refuse a write.
+So even if the report Lambda's code were compromised, both IAM and the database would refuse a write, and it could not read a customer's name or contact details.
+
+The views `v_risk_dashboard` and `v_open_alerts` contain no customer contact details, so access to them can be granted without access to `customers`.
 
 ## Network security
 
