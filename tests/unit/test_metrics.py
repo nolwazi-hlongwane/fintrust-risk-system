@@ -11,7 +11,6 @@ from unittest.mock import patch
 import pytest
 
 from fintrust import alert, ingest, metrics, score
-from tests.unit.test_alert import mail as mail  # noqa: F401  (pytest fixture)
 from tests.unit.test_alert import make_score, stream_record
 from tests.unit.test_score import fake_score, make_transaction, record
 
@@ -143,18 +142,18 @@ class TestScoreMetrics:
 
 
 class TestAlertMetrics:
-    def test_sent(self, mail, capsys):  # noqa: F811
+    def test_sent(self, mail, capsys):
         alert.handler({"Records": [stream_record(make_score(1)), stream_record(make_score(2))]}, Context())
         assert emitted(capsys) == {"AlertsSent": [2], "AlertFailures": [0]}
 
-    def test_duplicate_is_not_counted_as_sent(self, mail, capsys):  # noqa: F811
+    def test_duplicate_is_not_counted_as_sent(self, mail, capsys):
         item = stream_record(make_score(1))
         alert.handler({"Records": [item]}, Context())
         capsys.readouterr()
         alert.handler({"Records": [item]}, Context())
         assert emitted(capsys) == {"AlertsSent": [0], "AlertFailures": [0]}
 
-    def test_failure_is_published_before_the_retry_error(self, mail, capsys, monkeypatch):  # noqa: F811
+    def test_failure_is_published_before_the_retry_error(self, mail, capsys, monkeypatch):
         monkeypatch.setenv("FINTRUST_ALERT_SENDER", "not-verified@example.com")
         with pytest.raises(alert.AlertError):
             alert.handler({"Records": [stream_record(make_score(1))]}, Context())

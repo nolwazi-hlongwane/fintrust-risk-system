@@ -4,18 +4,15 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import boto3
 import pytest
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
-from moto.core import DEFAULT_ACCOUNT_ID
-from moto.ses import ses_backends
 
 from fintrust import alert, dynamo
 from fintrust.models import RiskScore, RuleHit
+from tests.conftest import ALERT_RECIPIENT as RECIPIENT
+from tests.conftest import ALERT_SENDER as SENDER
 
-SENDER = "compliance-alerts@example.com"
-RECIPIENT = "compliance-team@example.com"
 STAMP = "2026-09-15T13:10:00Z"
 
 
@@ -36,15 +33,6 @@ def stream_record(score=None, event_name="INSERT", item=None):
         item = dynamo.put_score(score)
     image = {key: TypeSerializer().serialize(value) for key, value in item.items()}
     return {"eventName": event_name, "dynamodb": {"NewImage": image}}
-
-
-@pytest.fixture
-def mail(events_table, monkeypatch):
-    """Fake SES with a verified sender, and config pointing at it. Returns the list of sent messages."""
-    monkeypatch.setenv("FINTRUST_ALERT_SENDER", SENDER)
-    monkeypatch.setenv("FINTRUST_ALERT_RECIPIENT", RECIPIENT)
-    boto3.client("ses", region_name="eu-north-1").verify_email_identity(EmailAddress=SENDER)
-    return ses_backends[DEFAULT_ACCOUNT_ID]["eu-north-1"].sent_messages
 
 
 def run(*records):

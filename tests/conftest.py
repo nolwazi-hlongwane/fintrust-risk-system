@@ -25,6 +25,13 @@ REGION = "eu-north-1"
 SSM_PREFIX = "/fintrust/test/"
 
 
+def pytest_collection_modifyitems(items):
+    """Mark everything under tests/integration, so `pytest -m "not integration"` skips it."""
+    for item in items:
+        if "/tests/integration/" in str(item.fspath).replace("\\", "/"):
+            item.add_marker(pytest.mark.integration)
+
+
 @pytest.fixture(autouse=True)
 def clean_config(monkeypatch):
     """Start every test with no FINTRUST_ settings and an empty SSM cache."""
@@ -180,6 +187,29 @@ def pipeline(events_table, monkeypatch):
     monkeypatch.setenv("FINTRUST_QUARANTINE_BUCKET", QUARANTINE_BUCKET)
     monkeypatch.setenv("FINTRUST_QUEUE_URL", queue_url)
     return Pipeline(s3, sqs, queue_url)
+
+
+# ----------------------------------------------------------------------------
+# SES (moto)
+# ----------------------------------------------------------------------------
+ALERT_SENDER = "compliance-alerts@example.com"
+ALERT_RECIPIENT = "compliance-team@example.com"
+
+
+@pytest.fixture
+def mail(events_table, monkeypatch):
+    """Fake SES with a verified sender, and config pointing at it.
+
+    Returns the list of messages sent so far, so a test can assert on
+    len(mail), mail[0].subject and mail[0].body.
+    """
+    from moto.core import DEFAULT_ACCOUNT_ID
+    from moto.ses import ses_backends
+
+    monkeypatch.setenv("FINTRUST_ALERT_SENDER", ALERT_SENDER)
+    monkeypatch.setenv("FINTRUST_ALERT_RECIPIENT", ALERT_RECIPIENT)
+    boto3.client("ses", region_name=REGION).verify_email_identity(EmailAddress=ALERT_SENDER)
+    return ses_backends[DEFAULT_ACCOUNT_ID][REGION].sent_messages
 
 
 # ----------------------------------------------------------------------------
