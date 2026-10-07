@@ -1,7 +1,7 @@
 # Data Management Design Document
 
 **Brief slot:** Week 13 Day 1: Design Kickoff (first draft). Finalised alongside the build in Week 14 Day 5.
-**Status:** draft. Field names follow the draft ERD and are confirmed against the deployed schema in Week 13 Day 2.
+**Status:** final. Field names match the deployed schema (a test compares the ERD with the database). A one-page summary is in [popia-lifecycle-statement.md](popia-lifecycle-statement.md).
 
 This document covers the five data management elements required by the brief: POPIA classification, data quality, lifecycle, migration, and the risk register.
 

@@ -5,6 +5,15 @@ The final draw.io diagram and its PDF export are kept in `docs/diagrams/`.
 
 ## Diagram
 
+The architecture diagram, showing every service, data flow and security boundary:
+
+![FinTrust architecture](diagrams/architecture.svg)
+
+- PDF: [diagrams/architecture.pdf](diagrams/architecture.pdf)
+- Editable draw.io source: [diagrams/architecture.drawio](diagrams/architecture.drawio)
+
+The same flow as a text diagram (renders on GitHub):
+
 ```mermaid
 flowchart LR
     U[Compliance officer<br/>browser] -->|HTTPS| CF[CloudFront]
@@ -83,20 +92,6 @@ Three consequences, each a deliberate decision:
 
 **Why two databases?** The ledger needs relationships, constraints and transactions that either fully happen or fully roll back, so it is relational (RDS). Scores and journey events are written once and read by a known key (account, then time), so they suit a key-value store (DynamoDB). This is the "purpose-built database" principle.
 
-## The network design (no NAT Gateway)
-
-A Lambda inside a private subnet has no route to the internet, so it can only reach AWS services that have a free gateway endpoint: S3 and DynamoDB.
-
-| Lambda | In VPC? | Talks to | Why |
-|---|---|---|---|
-| ingest | No | S3, SQS, DynamoDB | Never touches RDS, and needs SQS, which has no free endpoint. |
-| score | Yes | RDS, DynamoDB | Needs RDS. SQS delivers messages to it, so it needs no route to SQS. |
-| alert | No | SES, DynamoDB | SES has no free endpoint. Never touches RDS. |
-| query | Yes | RDS, DynamoDB, S3 | Needs RDS. |
-| report | Yes | RDS, S3 | Needs RDS. |
-
-Consequences: the alert Lambda is triggered by a DynamoDB Stream instead of a direct call; the database uses IAM authentication instead of a stored password; and the VPC Lambdas receive their configuration as environment variables copied from SSM at deploy time.
-
 ## Failure handling
 
 | Failure | What happens | How it is recovered |
@@ -107,3 +102,5 @@ Consequences: the alert Lambda is triggered by a DynamoDB Stream instead of a di
 | One account's message is stuck | Only that account's message group waits; other accounts keep flowing | Automatic once the message reaches the DLQ |
 | SES rejects an email | The ledger, the score and the alert row are already saved; the stream retries the email 3 times, then the record's details go to the alert dead-letter queue | Fix the cause (for example an unverified address); the alert is still listed by `GET /alerts` |
 | An Availability Zone fails | Lambda, SQS, DynamoDB, S3 and API Gateway continue in other AZs. RDS single-AZ is the one exposed component | Production design: RDS Multi-AZ with automatic failover (not deployed: outside Free Tier) |
+
+The Availability Zone case is worked through component by component in the [Well-Architected review](well-architected-review.md#3-reliability). The dead-letter recovery is proven on the real account by `scripts/e2e_test.py`.
