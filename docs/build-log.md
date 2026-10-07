@@ -336,3 +336,75 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 | Rubric C3: modules present | 8 of 10 (`alert` and `report` remain) |
 
 **Open items carried forward:** `GET /alerts` and the write routes (Week 14 Day 1); the dead-letter test on the real account with redrive (Week 14 Day 5, with an early run once alerts exist).
+
+---
+
+## Week 14 Day 1: Write API and Alert System
+
+**Built on:** Wednesday 7 October 2026 (brief slot: Week 14 Day 1, Monday 5 October 2026)
+**Branch:** `feature/w14d1-write-api-alerts`
+
+### What was built
+
+| Item | Where |
+|---|---|
+| Alert Lambda: one email per HIGH risk transaction, sent through SES | `fintrust/alert.py` |
+| Write routes: `POST /upload` (202), `POST /flag` (201), `POST /resolve` (200), and `GET /alerts` | `fintrust/query.py` |
+| Stored function `flag_account` (the brief's required stored procedure or function) | `sql/functions.sql` |
+| Alert markers in DynamoDB, so an email is never sent twice | `fintrust/dynamo.py` |
+| SES email verification | `infrastructure/ses/deploy_ses.sh` |
+| Alert dead-letter queue (standard queue, encrypted) | `infrastructure/sqs/deploy_queues.sh` |
+| Alert Lambda deployment: DynamoDB stream trigger with a filter, 3 retries, on-failure destination | `infrastructure/lambda/deploy_function.sh` |
+| Least-privilege permissions for the alert role; upload permission for the query role | `infrastructure/iam/policies/alert-data.json`, `query-data.json` |
+| Four new routes in the API definition | `infrastructure/apigateway/openapi.json` |
+| Live verification through the public API | `scripts/verify_write_api_alerts.py` |
+
+### Key decisions
+
+1. **The alert is started by the DynamoDB stream, not by the scoring Lambda.** The scoring Lambda is in the VPC with no NAT Gateway and cannot reach SES. It writes the score to DynamoDB (which it can reach); the stream then starts the alert Lambda, which runs outside the VPC.
+2. **The trigger is filtered.** Only SCORE items with `risk_level` HIGH start the alert Lambda. LOW and MEDIUM scores and journey steps never invoke it.
+3. **A failed email can never undo a ledger write.** The transaction, its risk events and the alert row were committed by the scoring Lambda before the email is attempted. If SES fails, the email is retried 3 times and then recorded in the alert dead-letter queue; the alert is still listed by `GET /alerts`.
+4. **One email per transaction.** Before sending, the alert Lambda checks DynamoDB for an ALERT marker; after sending, it writes one. A score that is written again does not send a second email.
+5. **`POST /upload` answers 202 and does not wait.** The API stores the file in the raw bucket and returns. S3 then invokes the ingest Lambda asynchronously, exactly as for a direct upload, so there is one ingest path, not two.
+6. **The API chooses the object key.** The caller's file name is checked against a strict pattern and placed under `uploads/<date>/<id>-<name>`. A request cannot overwrite a file or write outside `uploads/`; the query role's S3 permission is limited to that prefix as well.
+7. **`flag_account` is the only way the API can change an account.** The API's database user has no right to update `accounts` or insert into `risk_events`. It may only execute the function, which records the reason and sets the status in one atomic step.
+8. **`POST /resolve` is safe when two people click at once.** The update includes `AND status = 'OPEN'`, so only one request changes the row; the other gets 409.
+9. **The email carries no personal information.** Transaction id, masked account id, score and the rules that fired. No name, contact detail or full account number.
+10. **SES stays in the sandbox.** The sender and the compliance recipient are the same verified address, which is all this project needs and stays inside the Free Tier.
+
+### Test results
+
+- `pytest`: 658 passing (529 unit, 129 integration against PostgreSQL 16).
+- Unit tests cover every write route's validation and error mapping, the alert email's content and masking, duplicate suppression, SES failure and retry, and the stream filter fallback inside the function.
+- Integration tests prove on a real database: `flag_account` is atomic and refuses closed or unknown accounts; the API's database user cannot change an account except through the function; resolve works once and only once; alerts are listed with their transaction.
+- The IAM tests confirm the alert role has no wildcard actions and may send email only between the two verified addresses.
+- All new deployment scripts were run against a local AWS simulator, including the stream trigger with its filter and on-failure destination. `verify_write_api_alerts.py` passed all 19 of its API checks there, twice in a row, with the real ingest, score, alert and query handlers running against a real PostgreSQL. A re-upload of the same file sent no second email.
+- **First proven on the real account in this phase:** SES delivery to a real inbox, the DynamoDB stream trigger and its filter, and `POST` requests through API Gateway.
+
+### Evidence to capture (save in `docs/evidence/`)
+
+- [ ] `w14d1-verify-write-api-alerts.png`: terminal output of `python scripts/verify_write_api_alerts.py` ending in "23 of 23 checks passed"
+- [ ] `w14d1-ses-alert-email.png`: the alert email open in Gmail, showing the subject, masked account and rule breakdown (a required screenshot in the brief)
+- [ ] `w14d1-ses-verified-identity.png`: SES console, Identities, the address with status Verified
+- [ ] `w14d1-alert-lambda-trigger.png`: Lambda console, `fintrust-capstone-alert`, Configuration, Triggers, showing the DynamoDB trigger and its filter
+- [ ] `w14d1-curl-upload-202.png`: terminal, `curl` of `POST /upload` returning 202 with `"status": "ACCEPTED"`
+- [ ] `w14d1-curl-alerts.png`: terminal, `curl` of `GET /alerts?status=OPEN`
+- [ ] `w14d1-curl-flag-resolve.png`: terminal, `curl` of `POST /flag` (201) and `POST /resolve` (200, then 409)
+- [ ] `w14d1-api-gateway-resources.png`: API Gateway console, Resources, showing all eight routes
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| POST /upload returns 202 Accepted; Lambda invoked asynchronously | Met (S3 event invocation) |
+| POST /flag calls the `flag_account` stored function | Met |
+| POST /resolve | Met |
+| GET /alerts | Met |
+| `alert.py`: SES email for HIGH risk | Met, with duplicate suppression and a dead-letter queue |
+| Brief: stored procedure or function | Met (`flag_account`, PL/pgSQL) |
+| Brief: every psycopg2 except block rolls back | Met (all database work goes through `db.transaction()`) |
+| Rubric C1: full flow S3 → ingest → SQS FIFO → scoring → RDS + DynamoDB → API Gateway → SES | Deployed end to end |
+| Rubric C1: every Lambda role least-privilege | Met for the four deployed functions |
+| Rubric C3: modules present | 9 of 10 (`report` remains, Week 14 Day 4) |
+
+**Open items carried forward:** CloudWatch alarms on both dead-letter queues and on the high-risk count (Week 14 Day 2); the dashboard that uses these routes, and tightening CORS to its address (Week 14 Day 4); the dead-letter break-and-recover run on the real account (Week 14 Day 5).

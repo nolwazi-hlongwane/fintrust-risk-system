@@ -102,5 +102,5 @@ Consequences: the alert Lambda is triggered by a DynamoDB Stream instead of a di
 | The ingest Lambda crashes | Lambda retries twice, then sends the event to the ingest DLQ | Re-upload the file or replay the event |
 | The score Lambda fails on a message | The database transaction is rolled back; SQS redelivers; after 3 failed receives the message moves to the FIFO DLQ and an alarm fires | Fix the cause, then redrive the DLQ |
 | One account's message is stuck | Only that account's message group waits; other accounts keep flowing | Automatic once the message reaches the DLQ |
-| SES rejects an email | The ledger and score are already saved; the stream retries the alert | Automatic retry, then on-failure destination |
+| SES rejects an email | The ledger, the score and the alert row are already saved; the stream retries the email 3 times, then the record's details go to the alert dead-letter queue | Fix the cause (for example an unverified address); the alert is still listed by `GET /alerts` |
 | An Availability Zone fails | Lambda, SQS, DynamoDB, S3 and API Gateway continue in other AZs. RDS single-AZ is the one exposed component | Production design: RDS Multi-AZ with automatic failover (not deployed: outside Free Tier) |

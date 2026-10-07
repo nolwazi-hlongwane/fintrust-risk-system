@@ -1,7 +1,7 @@
 # API Design
 
 **Brief slot:** Week 13 Day 1: Design Kickoff (specification). Read routes built in Week 13 Day 5; `/alerts` and the write routes in Week 14 Day 1.
-**Status:** `/health`, `/transactions`, `/transactions/{transaction_id}/journey` and `/insights` are deployed. The machine-readable definition is `infrastructure/apigateway/openapi.json` (OpenAPI 3), which is what API Gateway is built from.
+**Status:** all eight routes are deployed (read routes in Week 13 Day 5; `/alerts`, `/upload`, `/flag` and `/resolve` in Week 14 Day 1). The machine-readable definition is `infrastructure/apigateway/openapi.json` (OpenAPI 3), which is what API Gateway is built from.
 
 ## Overview
 
@@ -133,7 +133,26 @@ Optional `from` and `to` dates.
 | `status` | no | `OPEN` or `RESOLVED` |
 | `limit`, `offset` | no | As for `/transactions` |
 
-Returns `items` and `pagination` in the same shape as `/transactions`.
+Returns `items` and `pagination` in the same shape as `/transactions`, newest alert first. Each item joins the alert to its transaction:
+
+```json
+{
+  "alert_id": 57,
+  "status": "OPEN",
+  "created_at": "2026-10-07 09:12:44.120000+00:00",
+  "resolved_at": null,
+  "resolved_by": null,
+  "resolution_note": null,
+  "transaction_id": "TXN-20261002-900007",
+  "account_id": "ACC-1007",
+  "tx_date": "2026-10-02 09:48:09+00:00",
+  "amount": "88750.00",
+  "currency": "ZAR",
+  "country_code": "AE",
+  "risk_score": 70,
+  "risk_level": "HIGH"
+}
+```
 
 ### POST /upload
 
@@ -154,7 +173,9 @@ Accepts the file and returns immediately. Processing continues in the background
 }
 ```
 
-Status `202 Accepted`. `400` for an empty body or a missing header row, `413` if larger than 5 MB.
+Status `202 Accepted`. `400` for an empty body, a header row with missing columns, a file that is not UTF-8 text or an unsafe `filename`; `413` if larger than 5 MB; `503` if the file could not be stored.
+
+The object key is always built by the API (`uploads/<date>/<8 characters of the upload id>-<filename>`); it is never taken from the caller. Only the header is checked here. Each row is validated by the ingest Lambda, and the progress of any transaction can be followed with `GET /transactions/{transaction_id}/journey`.
 
 ### POST /flag
 
@@ -168,7 +189,7 @@ Calls the `flag_account` database function, which inserts a `risk_events` row an
 { "risk_event_id": 381, "account_id": "ACC-1007", "account_status": "FLAGGED" }
 ```
 
-Status `201`. `400` if a field is missing or `reason` is longer than 500 characters, `404` if the account does not exist.
+Status `201`. `400` if a field is missing or `reason` is longer than 500 characters, `404` if the account does not exist, `409` if the account is closed.
 
 ### POST /resolve
 
@@ -177,10 +198,10 @@ Status `201`. `400` if a field is missing or `reason` is longer than 500 charact
 ```
 
 ```json
-{ "alert_id": 57, "status": "RESOLVED", "resolved_at": "2026-10-06T11:05:00Z" }
+{ "alert_id": 57, "status": "RESOLVED", "resolved_at": "2026-10-07 11:05:00.482113+00:00", "resolved_by": "n.hlongwane" }
 ```
 
-Status `200`. `404` if the alert does not exist, `409` if it is already resolved.
+Status `200`. `400` if `alert_id` is not a positive whole number or `resolved_by` is not 2 to 60 letters, digits, dots, dashes or underscores; `404` if the alert does not exist; `409` if it is already resolved. `resolution_note` is optional (at most 500 characters).
 
 ## Errors
 
