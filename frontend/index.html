@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>FinTrust risk desk</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <p class="brand">FinTrust <span class="brand-desk">risk desk</span></p>
+      <div class="session" id="session" hidden>
+        <span class="session-dot" aria-hidden="true"></span>
+        <span id="session-text">Connected</span>
+        <button type="button" class="link-button on-dark" id="disconnect">Disconnect</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Shown until an API key has been accepted. -->
+  <main class="connect" id="connect-view">
+    <form class="connect-card" id="connect-form" autocomplete="off">
+      <h1>Connect to the risk API</h1>
+      <p class="lede">Enter the key issued to the compliance team. It is kept for this browser tab only and is cleared when the tab closes.</p>
+      <label for="api-url">API address</label>
+      <input id="api-url" name="api-url" type="url" required spellcheck="false" placeholder="https://…execute-api.eu-north-1.amazonaws.com/dev">
+      <label for="api-key">API key</label>
+      <input id="api-key" name="api-key" type="password" required spellcheck="false" autocomplete="off">
+      <p class="form-error" id="connect-error" role="alert" hidden></p>
+      <button type="submit" class="button primary" id="connect-button">Connect</button>
+    </form>
+  </main>
+
+  <div id="app-view" hidden>
+    <nav class="tabs" aria-label="Sections">
+      <div class="tabs-inner" role="tablist">
+        <button type="button" role="tab" class="tab" data-view="overview" aria-selected="true">Overview</button>
+        <button type="button" role="tab" class="tab" data-view="transactions" aria-selected="false">Transactions</button>
+        <button type="button" role="tab" class="tab" data-view="alerts" aria-selected="false">Alerts <span class="count" id="alert-count" hidden></span></button>
+        <button type="button" role="tab" class="tab" data-view="accounts" aria-selected="false">Accounts</button>
+        <button type="button" role="tab" class="tab" data-view="upload" aria-selected="false">Upload a file</button>
+      </div>
+    </nav>
+
+    <main class="page" id="page" tabindex="-1"></main>
+  </div>
+
+  <!-- One transaction's journey, opened from any table. -->
+  <aside class="drawer" id="drawer" aria-labelledby="drawer-title" hidden>
+    <div class="drawer-head">
+      <h2 id="drawer-title">Transaction journey</h2>
+      <button type="button" class="link-button" id="drawer-close">Close</button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <dialog class="dialog" id="dialog">
+    <form method="dialog" id="dialog-form">
+      <h2 id="dialog-title"></h2>
+      <p class="lede" id="dialog-text"></p>
+      <div id="dialog-fields"></div>
+      <p class="form-error" id="dialog-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" class="button" id="dialog-cancel">Cancel</button>
+        <button type="submit" class="button primary" id="dialog-confirm"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
