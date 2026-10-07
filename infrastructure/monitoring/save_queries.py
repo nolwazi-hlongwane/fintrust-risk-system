@@ -28,10 +28,12 @@ def main():
     logs = boto3.client("logs", region_name=REGION)
     try:
         existing = {}
-        arguments = {"queryDefinitionNamePrefix": f"{FOLDER}/"}
+        # The prefix may not end with "/", so ask for "FinTrust" and keep "FinTrust/..." names.
+        arguments = {"queryDefinitionNamePrefix": FOLDER}
         while True:
             page = logs.describe_query_definitions(**arguments)
-            existing.update({item["name"]: item["queryDefinitionId"] for item in page["queryDefinitions"]})
+            existing.update({item["name"]: item["queryDefinitionId"] for item in page["queryDefinitions"]
+                             if item["name"].startswith(f"{FOLDER}/")})
             if "nextToken" not in page:
                 break
             arguments["nextToken"] = page["nextToken"]

@@ -113,7 +113,9 @@ def verify_dashboard_and_queries():
     check("the dashboard shows alarm status, queue depth and an error table",
           any(w["type"] == "alarm" for w in body["widgets"]) and any(w["type"] == "log" for w in body["widgets"])
           and "ApproximateNumberOfMessagesVisible" in text)
-    saved = logs.describe_query_definitions(queryDefinitionNamePrefix="FinTrust/")["queryDefinitions"]
+    # The prefix may not end with "/", so ask for "FinTrust" and keep "FinTrust/..." names.
+    saved = [q for q in logs.describe_query_definitions(queryDefinitionNamePrefix="FinTrust")["queryDefinitions"]
+             if q["name"].startswith("FinTrust/")]
     check(f"{SAVED_QUERIES} Logs Insights queries are saved under FinTrust/", len(saved) == SAVED_QUERIES,
           f"{len(saved)} found")
     check("one of them is the failed-ingestion query", any("Failed ingestion" in q["name"] for q in saved))

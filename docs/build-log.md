@@ -443,6 +443,7 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 8. **Queries are saved in the account and tested against the code.** A test fails if a query filters on a log message that no function writes, or if the documentation and the saved query differ.
 9. **X-Ray uses Lambda's built-in tracing only.** No SDK was added to the code; the trade-off is recorded in `docs/monitoring.md`.
 10. **Journey event times are recorded to the microsecond.** Found on first run on a faster machine: two events of the same stage written within one millisecond shared a sort key in DynamoDB, so the second replaced the first. The time in the key is now microseconds, with a regression test. In production the attempts are at least 60 seconds apart, so no deployed data was affected.
+11. **Corrected on first deployment:** looking up saved queries used the name prefix `FinTrust/`; CloudWatch Logs does not accept a prefix ending in `/`. The scripts now ask for `FinTrust` and keep the names that start with `FinTrust/`. The simulator does not implement this call, so the real account was the first place it ran.
 
 ### Test results
 
