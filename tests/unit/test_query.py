@@ -224,9 +224,32 @@ class TestJourney:
         dynamo.put_event("ACC-1007", self.STAMP, self.TXN, "ALERT_SENT")
         assert call("GET", "/transactions/{transaction_id}/journey", path=self.path())[1]["status"] == "ALERTED"
 
-    def test_unknown_transaction_is_404(self, events_table):
+    def test_unknown_transaction_is_404(self, events_table, cursor):
+        cursor.fetchone.return_value = None           # not in the ledger either
         status, body, _ = call("GET", "/transactions/{transaction_id}/journey", path={"transaction_id": "TXN-NOPE-000001"})
         assert status == 404 and body["error"]["code"] == "NOT_FOUND"
+
+    def test_transaction_loaded_as_opening_data_is_explained_from_the_ledger(self, events_table, cursor):
+        """No journey in DynamoDB, but RDS has the score and the rules that fired."""
+        cursor.fetchone.return_value = {"account_id": "ACC-1007", "risk_score": 70, "risk_level": "HIGH",
+                                        "created_at": "2026-09-15 13:15:04+00:00"}
+        cursor.fetchall.return_value = [
+            {"event_type": "HIGH_AMOUNT", "points": 50, "reason": "Amount 104500.00 is above 50000"},
+            {"event_type": "CROSS_BORDER", "points": 20, "reason": "Country AE is not ZA"},
+        ]
+        status, body, _ = call("GET", "/transactions/{transaction_id}/journey", path=self.path())
+        assert status == 200
+        assert (body["source"], body["status"], body["events"]) == ("ledger", "SCORED", [])
+        assert body["score"]["risk_score"] == 70
+        assert body["score"]["rules"][0] == {"rule": "HIGH_AMOUNT", "points": 50,
+                                             "detail": "Amount 104500.00 is above 50000"}
+        assert cursor.execute.call_args_list[0].args[1] == (self.TXN,)      # the id is a parameter, not SQL text
+
+    def test_ledger_is_not_consulted_when_the_event_store_has_the_journey(self, events_table, cursor):
+        dynamo.put_event("ACC-1007", self.STAMP, self.TXN, "QUEUED")
+        _, body, _ = call("GET", "/transactions/{transaction_id}/journey", path=self.path())
+        assert body["source"] == "event_store"
+        cursor.execute.assert_not_called()
 
     @pytest.mark.parametrize("value", ["", "x", "TXN 1 2 3 4", "../../etc/passwd"])
     def test_bad_id_is_400(self, events_table, value):
