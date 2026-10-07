@@ -36,7 +36,8 @@ jobs:
           for script in $(git ls-files '*.sh'); do bash -n "$script"; done
 
       - name: Unit tests
-        run: pytest tests/unit --cov=fintrust --cov-report=term-missing
+        # Fails if any test fails OR if less than 90% of the application code is exercised.
+        run: pytest tests/unit --cov=fintrust --cov-report=term-missing --cov-fail-under=90
         env:
           # Fake values: moto intercepts every AWS call, nothing reaches a real account.
           AWS_ACCESS_KEY_ID: testing
@@ -85,3 +86,16 @@ jobs:
 
       - name: Integration tests
         run: pytest tests/integration -v
+
+      - name: Whole suite with coverage
+        # Unit and integration together: the complete picture of what is tested.
+        run: |
+          set -o pipefail   # a failing test must fail this step even though the output is piped
+          pytest tests --cov=fintrust --cov-report=term-missing --cov-fail-under=95 | tee coverage.txt
+          {
+            echo "### Test coverage (unit + integration)"
+            echo '```'
+            sed -n '/coverage: platform/,/^TOTAL/p' coverage.txt
+            tail -n 1 coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
