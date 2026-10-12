@@ -200,7 +200,7 @@ def stage_api(url, key, ids, alert_id):
     check("GET /accounts ranks accounts by risk", status == 200 and len(accounts["items"]) >= 12)
     if alert_id:
         status, resolved = call(url, "POST", "/resolve", key, body={
-            "alert_id": alert_id, "resolved_by": "e2e.test", "resolution_note": "Resolved by the end-to-end test"})
+            "alert_id": alert_id, "resolution_note": "Resolved by the end-to-end test"})
         check("POST /resolve closes the alert", status == 200 and resolved["status"] == "RESOLVED", f"HTTP {status}")
     status, _body = call(url, "GET", "/transactions", None)
     check("a request without the API key is refused", status == 403, f"HTTP {status}")

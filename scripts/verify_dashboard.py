@@ -23,11 +23,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from api_auth import headers_for
 from botocore.exceptions import ClientError
 from verify_write_api_alerts import PREFIX, REGION, TLS, account_id, api_settings, check, parameter, results, session
 
 BUCKET = f"{PREFIX}-dashboard-{account_id}"
-FILES = ("index.html", "styles.css", "charts.js", "app.js", "config.js", "favicon.svg")
+FILES = ("index.html", "styles.css", "theme.js", "auth.js", "charts.js", "app.js", "config.js", "favicon.svg")
 OTHER_SITE = "https://evil.example"
 
 s3 = session.client("s3")
@@ -99,15 +100,20 @@ def verify_hosting(dashboard_url, api_url):
     check("every file the page needs is served", all(result[0] == 200 for result in loaded.values()),
           ", ".join(f"{name} {result[0]}" for name, result in loaded.items()))
     check("config.js points at this project's API", api_url in loaded["config.js"][2])
+    sign_in_url = parameter("cognito_domain")
+    check("config.js points at this project's sign-in (Cognito managed login) and app client",
+          sign_in_url in loaded["config.js"][2] and parameter("cognito_client_id") in loaded["config.js"][2])
     _, key = api_settings()
-    check("the API key is not in any file served to the browser",
-          not any(key in result[2] for result in loaded.values()))
+    check("the scripts' API key is not in any file served to the browser (the dashboard has its own)",
+          not any(key.api_key in result[2] for result in loaded.values()))
+    check("no token or password is in any file served to the browser",
+          not any(marker in result[2] for result in loaded.values() for marker in ("eyJ", "password\":")))
 
     api_origin = "/".join(api_url.split("/")[:3])
     csp = headers.get("content-security-policy", "")
-    check("Content-Security-Policy: only the page's own script, and only this API",
-          "script-src 'self'" in csp and f"connect-src {api_origin}" in csp and "default-src 'none'" in csp
-          and "unsafe-inline" not in csp)
+    check("Content-Security-Policy: only the page's own script, and only this API and its sign-in",
+          "script-src 'self'" in csp and f"connect-src {api_origin} {sign_in_url}" in csp
+          and "default-src 'none'" in csp and "unsafe-inline" not in csp)
     check("the page cannot be framed by another site, and HTTPS is enforced by the browser",
           headers.get("x-frame-options") == "DENY" and "max-age=" in headers.get("strict-transport-security", "")
           and headers.get("x-content-type-options") == "nosniff")
@@ -119,16 +125,18 @@ def verify_cors(dashboard_url, api_url, key):
           parameter("cors_allowed_origin") == dashboard_url, parameter("cors_allowed_origin"))
 
     status, headers, _ = fetch(api_url + "/transactions", "OPTIONS", {
-        "Origin": dashboard_url, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "x-api-key"})
-    check("the browser's preflight check from the dashboard is allowed",
+        "Origin": dashboard_url, "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization,x-api-key"})
+    allowed_headers = headers.get("access-control-allow-headers", "")
+    check("the browser's preflight check from the dashboard is allowed, with the sign-in header",
           status == 204 and headers.get("access-control-allow-origin") == dashboard_url
-          and "x-api-key" in headers.get("access-control-allow-headers", ""), f"HTTP {status}")
+          and "x-api-key" in allowed_headers and "authorization" in allowed_headers, f"HTTP {status}")
 
-    status, headers, _ = fetch(api_url + "/health", headers={"Origin": dashboard_url, "x-api-key": key})
+    status, headers, _ = fetch(api_url + "/health", headers={"Origin": dashboard_url, **headers_for(key)})
     check("a request from the dashboard is answered for the dashboard",
           status == 200 and headers.get("access-control-allow-origin") == dashboard_url, f"HTTP {status}")
 
-    status, headers, _ = fetch(api_url + "/health", headers={"Origin": OTHER_SITE, "x-api-key": key})
+    status, headers, _ = fetch(api_url + "/health", headers={"Origin": OTHER_SITE, **headers_for(key)})
     allowed = headers.get("access-control-allow-origin", "")
     check("a request from another website is not given permission to read the answer",
           allowed == dashboard_url and OTHER_SITE not in allowed and allowed != "*", allowed)
@@ -141,7 +149,7 @@ def verify_cors(dashboard_url, api_url, key):
 
 def verify_new_routes(api_url, key):
     print("\nWhat the dashboard reads")
-    status, _, body = fetch(api_url + "/accounts?limit=100", headers={"x-api-key": key})
+    status, _, body = fetch(api_url + "/accounts?limit=100", headers=headers_for(key))
     accounts = json.loads(body).get("items", []) if status == 200 else []
     points = [item["total_risk_points"] for item in accounts]
     check("GET /accounts lists every account, highest risk first",
@@ -149,7 +157,7 @@ def verify_new_routes(api_url, key):
     check("the accounts list holds no customer names or contact details",
           bool(accounts) and not {"customer_id", "full_name", "email", "phone_number"} & set(accounts[0]))
 
-    status, _, body = fetch(api_url + "/transactions/TXN-20260915-000225/journey", headers={"x-api-key": key})
+    status, _, body = fetch(api_url + "/transactions/TXN-20260915-000225/journey", headers=headers_for(key))
     journey = json.loads(body) if status == 200 else {}
     score = journey.get("score") or {}
     rules = score.get("rules", [])
@@ -166,7 +174,7 @@ def verify_chart_routes(api_url, key):
     print("\nThe chart data (Week 15 Day 1)")
 
     def get(path):
-        status, _, body = fetch(api_url + path, headers={"x-api-key": key})
+        status, _, body = fetch(api_url + path, headers=headers_for(key))
         return status, (json.loads(body) if status in (200, 404) else {})
 
     status, insights = get("/insights")
@@ -221,7 +229,7 @@ def main():
         api_url, key = api_settings()
         print(f"\nDashboard: {dashboard_url}\nAPI:       {api_url}")
         verify_hosting(dashboard_url, api_url)
-        status, _, body = fetch(api_url + "/health", headers={"x-api-key": key})
+        status, _, body = fetch(api_url + "/health", headers=headers_for(key))
         if status != 200:
             check("the API can reach the database", False, f"HTTP {status} {body[:80]}")
             print("\nStopping: is the database running?  ./scripts/rds_start.sh")

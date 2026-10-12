@@ -116,7 +116,7 @@ class TestDashboard:
 class TestSavedQueries:
     def test_names_are_unique_and_functions_exist(self):
         queries = load("queries.json")
-        assert len({query["name"] for query in queries}) == len(queries) == 10
+        assert len({query["name"] for query in queries}) == len(queries) == 12
         for query in queries:
             assert set(query["functions"]) <= FUNCTIONS and query["functions"]
 

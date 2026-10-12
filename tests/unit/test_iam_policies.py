@@ -140,20 +140,27 @@ def test_non_vpc_functions_cannot_log_in_to_the_database(function):
             assert "rds-db:connect" not in as_list(statement["Action"])
 
 
-def test_the_query_and_report_functions_cannot_write_to_dynamodb():
+def test_only_the_pipeline_functions_can_write_to_the_events_table():
     writers = set()
     for path in ROLE_POLICY_FILES:
         for statement in statements(path):
-            if {"dynamodb:PutItem", "dynamodb:UpdateItem"} & set(as_list(statement["Action"])):
+            writes = {"dynamodb:PutItem", "dynamodb:UpdateItem"} & set(as_list(statement["Action"]))
+            if writes and any("-events" in resource for resource in as_list(statement["Resource"])):
                 writers.add(path.name.split("-")[0])
     assert writers == {"ingest", "score", "alert"}
 
 
-def test_query_function_has_read_only_dynamodb_access():
-    actions = set()
-    for statement in statements(POLICY_DIR / "query-data.json"):
-        actions.update(a for a in as_list(statement["Action"]) if a.startswith("dynamodb:"))
-    assert actions == {"dynamodb:Query", "dynamodb:GetItem"}
+def test_query_function_reads_the_events_table_only():
+    assert actions_on("query", "-events") == {"dynamodb:Query", "dynamodb:GetItem"}
+
+
+def test_only_the_query_function_can_use_the_sessions_table_and_cannot_scan_or_delete():
+    """Week 15 Day 2: the API records sign-ins. It can read, create and update a
+    session record, but not list them all (Scan) or delete one: ending a session
+    is an update, so the record stays as an audit trail until its time-to-live."""
+    assert actions_on("query", "-sessions") == {"dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"}
+    for function in ("ingest", "score", "alert", "report"):
+        assert not actions_on(function, "-sessions"), function
 
 
 # ---- Week 13 Day 3: buckets, queues and the encryption key -------------------
