@@ -12,6 +12,10 @@ Read routes (Week 13 Day 5):
     GET /alerts                                  alerts for high-risk transactions
     GET /accounts                                accounts ranked by risk (Week 14 Day 4)
 
+Chart routes (Week 15 Day 1, dashboard analytics):
+    GET /insights/trends                         the series behind the Overview charts
+    GET /accounts/{account_id}/balance           one account's running balance (sql/monthly_summary.sql)
+
 Write routes (Week 14 Day 1):
     POST /upload    accept a CSV file; answers 202 at once, processing continues in the background
     POST /flag      flag an account for review (calls the flag_account database function)
@@ -38,6 +42,7 @@ import re
 import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -421,6 +426,351 @@ def get_insights(event):
     })
 
 
+# ----------------------------------------------------------------------------
+# chart data (Week 15 Day 1)
+#
+# Every chart on the Overview is drawn from numbers PostgreSQL works out here.
+# The browser only draws them; it never adds anything up itself. So a chart
+# can be checked against the same SQL a compliance analyst would run.
+# ----------------------------------------------------------------------------
+SCORE_BUCKET_SIZE = 10                  # histogram bars: 0-9, 10-19, ... 90-100
+RANKED_ACCOUNTS_SHOWN = 15              # ranking is calculated over ALL accounts, then the top ones are returned
+MAX_BALANCE_POINTS = 1000               # one account's balance line; older points are left off and flagged
+BURST_LIMIT = 3                         # the brief's rule: MORE THAN 3 high-risk transactions in 30 days
+LOCAL_DAY = "(%s AT TIME ZONE 'Africa/Johannesburg')"     # a timestamp as a South African calendar time
+
+
+def choose_granularity(first_day, last_day):
+    """How wide each bar of a time chart is: a day, a week or a month.
+
+    Chosen from the length of the period so a chart always has a readable
+    number of bars (at most about 62 days, 104 weeks or any number of months).
+    """
+    days = (last_day - first_day).days + 1
+    if days <= 62:
+        return "day"
+    if days <= 730:
+        return "week"
+    return "month"
+
+
+def bucket_start(day, granularity):
+    """The first day of the bar that `day` falls in. Weeks start on Monday,
+    exactly as PostgreSQL's date_trunc('week', ...) does."""
+    if granularity == "week":
+        return day - timedelta(days=day.weekday())
+    if granularity == "month":
+        return day.replace(day=1)
+    return day
+
+
+def bucket_starts(first_day, last_day, granularity):
+    """Every bar from first_day to last_day, including the empty ones, so a
+    quiet week shows as a gap instead of disappearing from the axis."""
+    current, last, starts = bucket_start(first_day, granularity), bucket_start(last_day, granularity), []
+    while current <= last:
+        starts.append(current)
+        if granularity == "day":
+            current += timedelta(days=1)
+        elif granularity == "week":
+            current += timedelta(days=7)
+        else:
+            current = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return starts
+
+
+def _between(column, start, end):
+    """Period conditions for one timestamp column, and their values."""
+    conditions, values = [], []
+    if start:
+        conditions.append(f"{column} >= %s")
+        values.append(start)
+    if end:
+        conditions.append(f"{column} < %s")
+        values.append(end)
+    return conditions, values
+
+
+def _chart_span(cursor, start_day, end_day, start, end):
+    """The first and last calendar day the time charts cover.
+
+    The dates the user chose, if any. A missing end is filled from the data:
+    the earliest and latest transaction or alert activity in the period.
+    """
+    if start_day and end_day:
+        return start_day, end_day
+    tx_conditions, tx_values = _between("tx_date", start, end)
+    raised_conditions, raised_values = _between("created_at", start, end)
+    resolved_conditions, resolved_values = _between("resolved_at", start, end)
+    cursor.execute(
+        f"""
+        SELECT min(moment)::date AS first_day, max(moment)::date AS last_day
+        FROM (
+            SELECT {LOCAL_DAY % "tx_date"} AS moment FROM transactions {_where(tx_conditions)}
+            UNION ALL
+            SELECT {LOCAL_DAY % "created_at"} FROM alerts {_where(raised_conditions)}
+            UNION ALL
+            SELECT {LOCAL_DAY % "resolved_at"} FROM alerts {_where([*resolved_conditions, "resolved_at IS NOT NULL"])}
+        ) AS activity
+        """,
+        [*tx_values, *raised_values, *resolved_values],
+    )
+    found = cursor.fetchone()
+    first_day = start_day or found["first_day"]
+    last_day = end_day or found["last_day"]
+    return first_day, last_day
+
+
+def get_trends(event):
+    """GET /insights/trends: the four series behind the Overview charts.
+
+    activity            transactions per day/week/month, split Low/Medium/High, with their value
+    score_distribution  how many transactions got each score, with the thresholds that cut them
+    alert_flow          alerts raised and resolved per day/week/month, and the median time to resolve
+    account_ranking     every account ranked by total risk points (PERCENT_RANK, as in
+                        sql/risk_report.sql), and whether it broke the 30-day burst rule
+    """
+    params = event.get("queryStringParameters") or {}
+    start_day, end_day, start, end = _period(params)
+    tx_conditions, tx_values = _between("t.tx_date", start, end)
+    tx_where = _where(tx_conditions)
+
+    with db.transaction() as cursor:
+        first_day, last_day = _chart_span(cursor, start_day, end_day, start, end)
+        granularity = choose_granularity(first_day, last_day) if first_day and last_day else "day"
+        starts = bucket_starts(first_day, last_day, granularity) if first_day and last_day else []
+
+        # 1. Activity. date_trunc puts every transaction in its bar; the unit is
+        #    one of three fixed words chosen above, passed as a value, never text from the caller.
+        cursor.execute(
+            f"""
+            SELECT date_trunc(%s, {LOCAL_DAY % "t.tx_date"})::date AS period_start,
+                   count(*) FILTER (WHERE t.risk_level = 'LOW')    AS low,
+                   count(*) FILTER (WHERE t.risk_level = 'MEDIUM') AS medium,
+                   count(*) FILTER (WHERE t.risk_level = 'HIGH')   AS high,
+                   COALESCE(sum(t.amount), 0)                      AS total_value
+            FROM transactions t {tx_where}
+            GROUP BY 1
+            """,
+            [granularity, *tx_values],
+        )
+        activity_rows = {row["period_start"]: row for row in cursor.fetchall()}
+
+        # 2. Score distribution: integer division puts a score of 0-9 in bar 0,
+        #    10-19 in bar 1 ... and 90-100 in bar 9. Each bar is split by the risk
+        #    level stored when the transaction was scored.
+        cursor.execute(
+            f"""
+            SELECT LEAST(t.risk_score / %s, 9) AS bucket, t.risk_level, count(*) AS transactions
+            FROM transactions t {tx_where}
+            GROUP BY 1, 2
+            """,
+            [SCORE_BUCKET_SIZE, *tx_values],
+        )
+        score_rows = cursor.fetchall()
+
+        # 3. Alert flow: when alerts were raised, and when they were resolved.
+        raised_conditions, raised_values = _between("created_at", start, end)
+        cursor.execute(
+            f"""
+            SELECT date_trunc(%s, {LOCAL_DAY % "created_at"})::date AS period_start, count(*) AS alerts
+            FROM alerts {_where(raised_conditions)}
+            GROUP BY 1
+            """,
+            [granularity, *raised_values],
+        )
+        raised = {row["period_start"]: row["alerts"] for row in cursor.fetchall()}
+        resolved_conditions, resolved_values = _between("resolved_at", start, end)
+        resolved_where = _where([*resolved_conditions, "status = 'RESOLVED'"])
+        cursor.execute(
+            f"""
+            SELECT date_trunc(%s, {LOCAL_DAY % "resolved_at"})::date AS period_start, count(*) AS alerts
+            FROM alerts {resolved_where}
+            GROUP BY 1
+            """,
+            [granularity, *resolved_values],
+        )
+        resolved = {row["period_start"]: row["alerts"] for row in cursor.fetchall()}
+        cursor.execute(
+            f"""
+            SELECT round((percentile_cont(0.5) WITHIN GROUP (
+                       ORDER BY EXTRACT(EPOCH FROM resolved_at - created_at)) / 3600)::numeric, 1)
+                   AS median_hours_to_resolve,
+                   (SELECT count(*) FROM alerts WHERE status = 'OPEN') AS open_now
+            FROM alerts {resolved_where}
+            """,
+            resolved_values,
+        )
+        alert_totals = cursor.fetchone()
+
+        # 4. Ranking. The same two ideas as sql/risk_report.sql, over the chosen period:
+        #    PERCENT_RANK() places each account between 0 (lowest) and 1 (highest) by
+        #    total risk points, calculated over ALL accounts BEFORE the top ones are
+        #    kept; and a rolling 30-day window finds the most high-risk transactions
+        #    the account had in any 30 days.
+        cursor.execute(
+            f"""
+            WITH scoped AS (
+                SELECT t.* FROM transactions t {tx_where}
+            ),
+            rolling AS (
+                SELECT account_id,
+                       COUNT(*) OVER (
+                           PARTITION BY account_id
+                           ORDER BY tx_date
+                           RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW
+                       ) AS high_risk_in_30_days
+                FROM scoped
+                WHERE risk_level = 'HIGH'
+            ),
+            peaks AS (
+                SELECT account_id, MAX(high_risk_in_30_days) AS peak_high_risk_in_30_days
+                FROM rolling
+                GROUP BY account_id
+            ),
+            account_totals AS (
+                SELECT account_id,
+                       COUNT(*)                                     AS transaction_count,
+                       COUNT(*) FILTER (WHERE risk_level = 'HIGH')  AS high_risk_count,
+                       SUM(risk_score)                              AS total_risk_points
+                FROM scoped
+                GROUP BY account_id
+            ),
+            ranked AS (
+                SELECT account_totals.*,
+                       ROUND(PERCENT_RANK() OVER (ORDER BY total_risk_points)::numeric, 4) AS fraud_percentile,
+                       RANK() OVER (ORDER BY total_risk_points DESC)                       AS fraud_rank,
+                       COUNT(*) OVER ()                                                    AS accounts_ranked
+                FROM account_totals
+            )
+            SELECT r.account_id, a.status AS account_status, r.transaction_count, r.high_risk_count,
+                   r.total_risk_points, r.fraud_rank, r.fraud_percentile, r.accounts_ranked,
+                   COALESCE(p.peak_high_risk_in_30_days, 0) AS peak_high_risk_in_30_days
+            FROM ranked r
+            JOIN accounts a ON a.account_id = r.account_id
+            LEFT JOIN peaks p ON p.account_id = r.account_id
+            ORDER BY r.fraud_rank, r.account_id
+            LIMIT %s
+            """,
+            [*tx_values, RANKED_ACCOUNTS_SHOWN],
+        )
+        ranking = [dict(row) for row in cursor.fetchall()]
+
+    activity = []
+    for period_start in starts:
+        row = activity_rows.get(period_start) or {}
+        counts = {level: row.get(level, 0) for level in ("low", "medium", "high")}
+        activity.append({
+            "period_start": period_start,
+            **counts,
+            "transactions": sum(counts.values()),
+            "total_value": row.get("total_value", 0),
+        })
+
+    buckets = [
+        {"from": index * SCORE_BUCKET_SIZE, "to": 100 if index == 9 else index * SCORE_BUCKET_SIZE + 9,
+         "low": 0, "medium": 0, "high": 0}
+        for index in range(10)
+    ]
+    for row in score_rows:
+        buckets[row["bucket"]][row["risk_level"].lower()] += row["transactions"]
+
+    accounts_ranked = ranking[0]["accounts_ranked"] if ranking else 0
+    for row in ranking:
+        del row["accounts_ranked"]
+        row["burst_detected"] = row["peak_high_risk_in_30_days"] > BURST_LIMIT
+
+    return respond(200, {
+        "period": {"from": start_day, "to": end_day},
+        "span": {"first_day": first_day, "last_day": last_day},
+        "granularity": granularity,
+        "activity": activity,
+        "score_distribution": {
+            "bucket_size": SCORE_BUCKET_SIZE,
+            "thresholds": {"medium": config.get_int("medium_risk_score"), "high": config.get_int("high_risk_score")},
+            "buckets": buckets,
+        },
+        "alert_flow": {
+            "periods": [
+                {"period_start": s, "raised": raised.get(s, 0), "resolved": resolved.get(s, 0)} for s in starts
+            ],
+            "raised": sum(raised.values()),
+            "resolved": sum(resolved.values()),
+            "open_now": alert_totals["open_now"],
+            "median_hours_to_resolve": alert_totals["median_hours_to_resolve"],
+        },
+        "account_ranking": {
+            "accounts_ranked": accounts_ranked,
+            "burst_rule": f"more than {BURST_LIMIT} high-risk transactions in any 30 days",
+            "items": ranking,
+        },
+    })
+
+
+# Wraps sql/monthly_summary.sql, the project's running-balance window function.
+# The filters are applied OUTSIDE the window: the balance on each row is worked
+# out from the account's whole history first, and only then are rows outside
+# the period dropped. Filtering by date first would restart the balance at zero.
+# PostgreSQL may still apply "account_id = ..." before the window, because the
+# window is partitioned by account_id: the result is the same and only that
+# account's rows are read.
+BALANCE_SQL = """
+    SELECT s.transaction_id, s.tx_date, s.tx_type, s.amount, s.signed_amount, s.running_balance,
+           t.risk_level, t.risk_score
+    FROM ({monthly_summary}) AS s
+    JOIN transactions t ON t.transaction_id = s.transaction_id
+    {where}
+    ORDER BY s.tx_date DESC, s.transaction_id DESC
+    LIMIT %s
+"""
+
+
+def get_account_balance(event):
+    """GET /accounts/{account_id}/balance: the account's running balance, one point per transaction."""
+    account_id = ((event.get("pathParameters") or {}).get("account_id") or "").strip().upper()
+    if not ACCOUNT_ID_PATTERN.match(account_id):
+        raise ApiError(400, "VALIDATION_ERROR", "account_id must look like ACC-1234")
+    params = event.get("queryStringParameters") or {}
+    start_day, end_day, start, end = _period(params)
+    period_conditions, period_values = _between("s.tx_date", start, end)
+    sql = BALANCE_SQL.format(
+        monthly_summary=db.read_sql_file("monthly_summary.sql"),
+        where=_where(["s.account_id = %s", *period_conditions]),
+    )
+
+    with db.transaction() as cursor:
+        cursor.execute("SELECT status FROM accounts WHERE account_id = %s", (account_id,))
+        account = cursor.fetchone()
+        if account is None:
+            raise ApiError(404, "NOT_FOUND", f"Account {account_id} does not exist")
+        # One extra row is asked for, only to know whether there were more than the limit.
+        cursor.execute(sql, [account_id, *period_values, MAX_BALANCE_POINTS + 1])
+        rows = [dict(row) for row in cursor.fetchall()]
+
+    truncated = len(rows) > MAX_BALANCE_POINTS
+    points = list(reversed(rows[:MAX_BALANCE_POINTS]))         # oldest first, for drawing left to right
+    summary = None
+    if points:
+        summary = {
+            # The balance just before the first point shown: its balance minus its own amount.
+            "opening_balance": points[0]["running_balance"] - points[0]["signed_amount"],
+            "closing_balance": points[-1]["running_balance"],
+            "lowest_balance": min(point["running_balance"] for point in points),
+            "highest_balance": max(point["running_balance"] for point in points),
+            "credits": sum((p["amount"] for p in points if p["tx_type"] == "CREDIT"), Decimal(0)),
+            "debits": sum((p["amount"] for p in points if p["tx_type"] == "DEBIT"), Decimal(0)),
+            "high_risk_transactions": sum(1 for point in points if point["risk_level"] == "HIGH"),
+        }
+    return respond(200, {
+        "account_id": account_id,
+        "account_status": account["status"],
+        "period": {"from": start_day, "to": end_day},
+        "points": points,
+        "truncated": truncated,
+        "summary": summary,
+    })
+
+
 ACCOUNT_STATUSES = ("ACTIVE", "FLAGGED", "CLOSED")
 
 
@@ -616,6 +966,8 @@ ROUTES = {
     ("GET", "/alerts"): get_alerts,
     ("POST", "/upload"): post_upload,
     ("GET", "/accounts"): get_accounts,
+    ("GET", "/insights/trends"): get_trends,
+    ("GET", "/accounts/{account_id}/balance"): get_account_balance,
     ("POST", "/flag"): post_flag,
     ("POST", "/resolve"): post_resolve,
 }

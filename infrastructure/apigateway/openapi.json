@@ -314,6 +314,73 @@
         }
       }
     },
+    "/insights/trends": {
+      "get": {
+        "summary": "The series behind the dashboard charts: activity, score distribution, alert flow and account ranking",
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Missing or invalid API key"
+          },
+          "429": {
+            "description": "Usage plan limit reached"
+          },
+          "500": {
+            "description": "Unexpected error"
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "arn:aws:apigateway:__REGION__:lambda:path/2015-03-31/functions/__LAMBDA_ARN__/invocations",
+          "passthroughBehavior": "when_no_match"
+        },
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Start date YYYY-MM-DD (inclusive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "End date YYYY-MM-DD (inclusive)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "options": {
+        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "responses": {
+          "204": {
+            "description": "CORS headers"
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "arn:aws:apigateway:__REGION__:lambda:path/2015-03-31/functions/__LAMBDA_ARN__/invocations",
+          "passthroughBehavior": "when_no_match"
+        }
+      }
+    },
     "/alerts": {
       "get": {
         "summary": "List alerts for high-risk transactions",
@@ -464,6 +531,94 @@
           "uri": "arn:aws:apigateway:__REGION__:lambda:path/2015-03-31/functions/__LAMBDA_ARN__/invocations",
           "passthroughBehavior": "when_no_match"
         }
+      }
+    },
+    "/accounts/{account_id}/balance": {
+      "get": {
+        "summary": "One account's running balance (the sql/monthly_summary.sql window function)",
+        "security": [
+          {
+            "api_key": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Missing or invalid API key"
+          },
+          "404": {
+            "description": "No such account"
+          },
+          "429": {
+            "description": "Usage plan limit reached"
+          },
+          "500": {
+            "description": "Unexpected error"
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "arn:aws:apigateway:__REGION__:lambda:path/2015-03-31/functions/__LAMBDA_ARN__/invocations",
+          "passthroughBehavior": "when_no_match"
+        },
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Start date YYYY-MM-DD (inclusive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "End date YYYY-MM-DD (inclusive)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "options": {
+        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "responses": {
+          "204": {
+            "description": "CORS headers"
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "arn:aws:apigateway:__REGION__:lambda:path/2015-03-31/functions/__LAMBDA_ARN__/invocations",
+          "passthroughBehavior": "when_no_match"
+        },
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/upload": {

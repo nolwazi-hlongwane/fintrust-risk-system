@@ -80,8 +80,9 @@ rm -rf "$BUILD" "$ZIP"
 mkdir -p "$BUILD"
 cp -R "$ROOT/fintrust" "$BUILD/fintrust"
 find "$BUILD" -name "__pycache__" -type d -prune -exec rm -rf {} +
-if [[ "$FN" == "report" ]]; then
-  # The report runs the project's own SQL files, so they travel with the code.
+if [[ "$FN" == "report" || "$FN" == "query" ]]; then
+  # The report, and the API's running-balance chart, run the project's own SQL
+  # files, so they travel with the code (one source of truth for the analytics).
   mkdir -p "$BUILD/fintrust/sql"
   cp "$ROOT/sql/monthly_summary.sql" "$ROOT/sql/risk_report.sql" "$BUILD/fintrust/sql/"
 fi
