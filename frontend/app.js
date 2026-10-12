@@ -32,7 +32,11 @@
   };
   const RULE_NAMES = { HIGH_AMOUNT: "High amount", HIGH_VELOCITY: "High velocity", CROSS_BORDER: "Cross-border" };
 
-  const state = { apiUrl: "", apiKey: "", view: "overview", tracker: null };
+  const state = {
+    apiUrl: "", apiKey: "", view: "overview", tracker: null,
+    period: { from: "", to: "" },     // the Overview's period, kept while moving between tabs
+    balanceAccount: null,             // the account whose running balance is shown
+  };
   const $ = (id) => document.getElementById(id);
 
   // ------------------------------------------------------------------ helpers
@@ -219,6 +223,8 @@
   function go(view) {
     state.view = view;
     stopTracking();
+    FinTrustCharts.hideTip();
+    showPeriod = null;
     for (const tab of document.querySelectorAll(".tab")) {
       tab.setAttribute("aria-selected", String(tab.dataset.view === view));
     }
@@ -276,67 +282,424 @@
 
   // ----------------------------------------------------------------- overview
 
-  views.overview = function (page, period) {
-    const from = el("input", { type: "date", value: (period && period.from) || "" });
-    const to = el("input", { type: "date", value: (period && period.to) || "" });
+  // The Overview answers three questions, top to bottom:
+  //   how much was processed and what needs attention   (the figures, GET /insights)
+  //   how it changed over time and how scores spread    (the charts, GET /insights/trends)
+  //   which accounts stand out, and what their money did (ranking + running balance)
+  // Every chart is drawn from numbers PostgreSQL worked out; see docs/dashboard.md.
+
+  views.overview = function (page) {
+    const period = state.period;
+    const from = el("input", { type: "date", value: period.from });
+    const to = el("input", { type: "date", value: period.to });
+    const presets = el("div", { class: "presets", role: "group", "aria-label": "Quick periods" },
+      [["All time", null], ["Last 7 days", 7], ["Last 30 days", 30], ["Last 90 days", 90]].map(([label, days]) =>
+        el("button", { type: "button", class: "chip", "aria-pressed": String(isPreset(period, days)),
+          onclick: () => show(days ? lastDays(days) : { from: "", to: "" }) }, label)));
     const filters = el("form", { class: "filters", onsubmit: (event) => {
       event.preventDefault();
-      views.overview(page, { from: from.value, to: to.value });
-    } }, field("From", from), field("To", to), el("button", { type: "submit", class: "button" }, "Show period"));
+      if (from.value && to.value && from.value > to.value) { toast("The From date must not be after the To date."); return; }
+      show({ from: from.value, to: to.value });
+    } }, field("From", from), field("To", to), el("button", { type: "submit", class: "button" }, "Show period"), presets);
 
-    const content = el("div", null, el("p", { class: "notice", text: "Loading…" }));
+    const content = el("div", { class: "overview" }, el("p", { class: "notice", text: "Loading…" }));
     page.replaceChildren(
       pageHead("Overview", "What has been processed and what needs attention. Leave the dates empty to see everything."),
       filters, content);
+    loadOverview(content, period);
 
-    api("GET", "/insights", { params: { from: from.value, to: to.value } }).then((data) => {
-      const levels = data.by_risk_level;
-      const total = data.totals.transactions;
-      const share = el("div", { class: "share", role: "img",
-        "aria-label": `Low ${levels.LOW}, medium ${levels.MEDIUM}, high ${levels.HIGH}` });
-      for (const level of ["LOW", "MEDIUM", "HIGH"]) {
-        if (!levels[level]) continue;
-        const part = el("span", { class: level.toLowerCase(), title: `${level}: ${levels[level]}` });
-        part.style.flexGrow = String(levels[level]);
-        share.append(part);
-      }
-      const key = el("ul", { class: "key" }, ["LOW", "MEDIUM", "HIGH"].map((level) => el("li", null,
-        el("span", { class: "swatch " + level.toLowerCase(), "aria-hidden": "true" }),
-        `${level.charAt(0) + level.slice(1).toLowerCase()} ${whole.format(levels[level])}`)));
-
-      const mostFired = Math.max(1, ...Object.values(data.rules_fired));
-      const rules = el("ul", { class: "bars" }, Object.entries(data.rules_fired).map(([rule, fired]) => {
-        const fill = el("div", { class: "bar-fill" });
-        fill.style.width = (100 * fired / mostFired) + "%";
-        if (!fired) fill.style.minWidth = "0";
-        return el("li", null, el("span", { text: RULE_NAMES[rule] || rule }),
-          el("div", { class: "bar-track" }, fill), el("span", { class: "value", text: whole.format(fired) }));
-      }));
-
-      content.replaceChildren(
-        el("div", { class: "figures" },
-          figure(whole.format(total), "Transactions"),
-          figure(formatMoney(data.totals.total_value), "Total value"),
-          figure(whole.format(data.totals.accounts), "Active accounts"),
-          figure(whole.format(levels.HIGH), "High risk", levels.HIGH > 0),
-          figure(whole.format(data.open_alerts), "Open alerts", data.open_alerts > 0)),
-        el("div", { class: "split section" },
-          el("div", null, el("h2", { text: "Risk levels" }),
-            total ? share : el("p", { class: "notice", text: "No transactions in this period." }), total ? key : null),
-          el("div", null, el("h2", { text: "Rules that fired" }), rules)),
-        el("div", { class: "section" }, el("h2", { text: "Accounts with the most high-risk transactions" }),
-          table([
-            { label: "Account", cell: (r) => r.account_id },
-            { label: "Status", cell: (r) => statusPill(r.status) },
-            { label: "High-risk transactions", number: true, cell: (r) => whole.format(r.high_risk_transactions) },
-          ], data.top_risk_accounts, "No high-risk transactions in this period.",
-          (row) => { go("transactions"); views.transactions($("page"), { account_id: row.account_id, risk_level: "HIGH" }); })));
-    }).catch((error) => handleFailure(error, content));
+    // A new period refreshes the same page in place (the filters, presets and
+    // charts stay where they are), so nothing jumps while the data loads.
+    function show(next) {
+      state.period = next;
+      from.value = next.from;
+      to.value = next.to;
+      const days = [null, 7, 30, 90];
+      presets.querySelectorAll(".chip").forEach((chip, i) => chip.setAttribute("aria-pressed", String(isPreset(next, days[i]))));
+      loadOverview(content, next);
+    }
+    showPeriod = show;
   };
 
-  function figure(value, label, attention) {
-    return el("div", { class: "figure" + (attention ? " attention" : "") },
-      el("div", { class: "figure-value", text: value }), el("div", { class: "figure-label", text: label }));
+  let showPeriod = null;      // set by the Overview; lets a chart bar zoom the whole page into its period
+
+  function isPreset(period, days) {
+    if (!days) return !period.from && !period.to;
+    const preset = lastDays(days);
+    return period.from === preset.from && period.to === preset.to;
+  }
+
+  /** The last `days` calendar days, ending today in South African time, as YYYY-MM-DD. */
+  function lastDays(days) {
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg" }).format(new Date());
+    const start = new Date(today + "T00:00:00Z");
+    start.setUTCDate(start.getUTCDate() - (days - 1));
+    return { from: start.toISOString().slice(0, 10), to: today };
+  }
+
+  async function loadOverview(content, period) {
+    // Keep the previous picture, dimmed, until the new one arrives: no jump, no flash.
+    content.classList.add("refreshing");
+    const params = { from: period.from, to: period.to };
+    // Asked for together; if the charts fail, the figures still show (and the other way round).
+    const [summary, trends] = await Promise.allSettled([
+      api("GET", "/insights", { params }),
+      api("GET", "/insights/trends", { params }),
+    ]);
+    if (state.period !== period || !content.isConnected) return;       // the user has moved on
+    content.classList.remove("refreshing");
+    const failed = [summary, trends].find((result) => result.status === "rejected" && result.reason.status === 403);
+    if (failed) { handleFailure(failed.reason, content); return; }
+    if (summary.status === "rejected") { handleFailure(summary.reason, content); return; }
+
+    const data = summary.value;
+    const levels = data.by_risk_level;
+    const total = data.totals.transactions;
+    const parts = [figures(data)];
+
+    if (trends.status === "rejected") {
+      parts.push(el("div", { class: "section" }, failureNotice(trends.reason)));
+    } else {
+      parts.push(activityPanel(trends.value, period));
+    }
+
+    const share = el("div", { class: "share", role: "img",
+      "aria-label": `Low ${levels.LOW}, medium ${levels.MEDIUM}, high ${levels.HIGH}` });
+    for (const level of ["LOW", "MEDIUM", "HIGH"]) {
+      if (!levels[level]) continue;
+      const part = el("span", { class: level.toLowerCase(), title: `${titleCase(level)}: ${whole.format(levels[level])}` });
+      part.style.flexGrow = String(levels[level]);
+      share.append(part);
+    }
+    const key = el("ul", { class: "key" }, ["LOW", "MEDIUM", "HIGH"].map((level) => el("li", null,
+      el("span", { class: "swatch " + level.toLowerCase(), "aria-hidden": "true" }),
+      `${titleCase(level)} ${whole.format(levels[level])}`, el("span", { class: "muted", text: total ? ` (${percent(levels[level] / total)})` : "" }))));
+
+    const mostFired = Math.max(1, ...Object.values(data.rules_fired));
+    const rules = el("ul", { class: "bars" }, Object.entries(data.rules_fired).map(([rule, fired]) => {
+      const fill = el("div", { class: "bar-fill" });
+      fill.style.width = (100 * fired / mostFired) + "%";
+      if (!fired) fill.style.minWidth = "0";
+      return el("li", null, el("span", { text: RULE_NAMES[rule] || rule }),
+        el("div", { class: "bar-track" }, fill), el("span", { class: "value", text: whole.format(fired) }));
+    }));
+
+    parts.push(el("div", { class: "split section" },
+      panel("Risk levels", "Every transaction is scored 0 to 100 and placed in one level.",
+        total ? share : el("p", { class: "notice", text: "No transactions in this period." }), total ? key : null),
+      panel("Rules that fired", "How many times each risk rule added points. One transaction can fire more than one rule.", rules)));
+
+    if (trends.status === "fulfilled") {
+      parts.push(el("div", { class: "split section" }, scorePanel(trends.value), alertPanel(trends.value, period)));
+      const balanceHost = el("div");
+      parts.push(el("div", { class: "split wide-right section" },
+        rankingPanel(trends.value, balanceHost, period), balanceHost));
+    }
+    content.replaceChildren(...parts);
+  }
+
+  function figures(data) {
+    const levels = data.by_risk_level;
+    const total = data.totals.transactions;
+    return el("div", { class: "figures" },
+      figure(whole.format(total), "Transactions"),
+      figure(formatMoney(data.totals.total_value), "Total value", { wide: true }),
+      figure(whole.format(data.totals.accounts), "Accounts with transactions"),
+      figure(whole.format(levels.HIGH), "High risk", { attention: levels.HIGH > 0,
+        note: total ? `${percent(levels.HIGH / total)} of transactions` : null }),
+      figure(whole.format(data.open_alerts), "Open alerts", { attention: data.open_alerts > 0 }));
+  }
+
+  function figure(value, label, options) {
+    const { attention, wide, note } = options || {};
+    return el("div", { class: ["figure", attention ? "attention" : "", wide ? "wide" : ""].join(" ").trim() },
+      el("div", { class: "figure-value", text: value }), el("div", { class: "figure-label", text: label }),
+      note ? el("div", { class: "figure-note", text: note }) : null);
+  }
+
+  /** A titled card. `lede` explains in one line what the reader is looking at. */
+  function panel(title, lede, ...body) {
+    return el("section", { class: "panel" }, el("h2", { text: title }), lede ? el("p", { class: "panel-lede", text: lede }) : null, ...body);
+  }
+
+  /** The numbers behind a chart, as a table: the accessible and auditable twin of every picture. */
+  function numbers(columns, rows) {
+    return el("details", { class: "numbers" }, el("summary", { text: "Show the numbers" }), table(columns, rows, "Nothing to show."));
+  }
+
+  const titleCase = (word) => word.charAt(0) + word.slice(1).toLowerCase();
+  const percent = (fraction) => new Intl.NumberFormat("en-ZA", { style: "percent", maximumFractionDigits: 1 }).format(fraction);
+  const compactCount = (value) => whole.format(value);
+  /** Axis money: R400k, R1.2m. Precise enough that two ticks `step` apart never read the same. */
+  function compactMoney(value, step) {
+    const size = Math.abs(value);
+    const sign = value < 0 ? "−" : "";
+    const unit = size >= 1e6 && step >= 1e5 ? [1e6, "m"] : size >= 1e3 && step >= 100 ? [1e3, "k"] : [1, ""];
+    let digits = 0;                                    // as many decimals as the step itself has (2.5k -> 1)
+    while (digits < 2 && Math.abs(Math.round(step / unit[0] * 10 ** digits) - step / unit[0] * 10 ** digits) > 1e-6) digits += 1;
+    const number = new Intl.NumberFormat("en-ZA", { maximumFractionDigits: digits, minimumFractionDigits: 0 });
+    return `${sign}R${number.format(size / unit[0])}${unit[1]}`;
+  }
+
+  // Calendar days from the API ("2026-09-05") are formatted as they are, never shifted by a time zone.
+  const asDay = (text) => new Date(text + "T00:00:00Z");
+  const dayShort = new Intl.DateTimeFormat("en-ZA", { timeZone: "UTC", day: "numeric", month: "short" });
+  const dayLong = new Intl.DateTimeFormat("en-ZA", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  const monthName = new Intl.DateTimeFormat("en-ZA", { timeZone: "UTC", month: "short", year: "numeric" });
+  const monthLong = new Intl.DateTimeFormat("en-ZA", { timeZone: "UTC", month: "long", year: "numeric" });
+
+  function bucketLabel(text, granularity) {
+    return granularity === "month" ? monthName.format(asDay(text)) : dayShort.format(asDay(text));
+  }
+  function bucketTitle(text, granularity) {
+    if (granularity === "month") return monthLong.format(asDay(text));
+    return (granularity === "week" ? "Week of " : "") + dayLong.format(asDay(text));
+  }
+  const BUCKET_WORD = { day: "day", week: "week", month: "month" };
+
+  /** The first and last day of one bar, kept inside the period the user chose. */
+  function bucketPeriod(start, granularity, period) {
+    const last = asDay(start);
+    if (granularity === "week") last.setUTCDate(last.getUTCDate() + 6);
+    if (granularity === "month") { last.setUTCMonth(last.getUTCMonth() + 1, 0); }
+    let from = start;
+    let to = last.toISOString().slice(0, 10);
+    if (period.from && from < period.from) from = period.from;
+    if (period.to && to > period.to) to = period.to;
+    return { from, to };
+  }
+
+  function zoomInto(start, granularity, period) {
+    FinTrustCharts.hideTip();
+    if (showPeriod) showPeriod(bucketPeriod(start, granularity, period));
+  }
+
+  const RISK_SERIES = [
+    { key: "low", name: "Low", cls: "low" },
+    { key: "medium", name: "Medium", cls: "medium" },
+    { key: "high", name: "High", cls: "high" },
+  ];
+
+  function activityPanel(trends, period) {
+    const rows = trends.activity;
+    const word = BUCKET_WORD[trends.granularity];
+    const host = el("div");
+    const card = panel("Activity over time",
+      `Transactions per ${word}, split by risk level.` + (trends.granularity === "day" ? "" : " Select a bar to zoom into it."),
+      FinTrustCharts.legend(RISK_SERIES.map((item) => ({ name: item.name, cls: item.cls }))), host,
+      numbers([
+        { label: titleCase(word), cell: (r) => bucketTitle(r.period_start, trends.granularity) },
+        { label: "Transactions", number: true, cell: (r) => whole.format(r.transactions) },
+        { label: "Low", number: true, cell: (r) => whole.format(r.low) },
+        { label: "Medium", number: true, cell: (r) => whole.format(r.medium) },
+        { label: "High", number: true, cell: (r) => whole.format(r.high) },
+        { label: "Value", number: true, cell: (r) => formatMoney(r.total_value) },
+      ], rows));
+    card.classList.add("section");
+    if (!rows.length) { host.replaceWith(el("p", { class: "notice", text: "No transactions in this period." })); return card; }
+    FinTrustCharts.columnChart(host, {
+      label: `Transactions per ${word} by risk level`,
+      labels: rows.map((r) => bucketLabel(r.period_start, trends.granularity)),
+      titles: rows.map((r) => bucketTitle(r.period_start, trends.granularity)),
+      series: RISK_SERIES,
+      stacked: true,
+      value: (i, key) => rows[i][key],
+      tick: compactCount,
+      rows: (i) => [
+        { value: whole.format(rows[i].transactions), label: "transactions" },
+        { value: formatMoney(rows[i].total_value), label: "in value" },
+        ...RISK_SERIES.slice().reverse().map((item) => ({ value: whole.format(rows[i][item.key]), label: item.name, key: "key-" + item.cls })),
+      ],
+      onSelect: trends.granularity === "day" ? null : (i) => zoomInto(rows[i].period_start, trends.granularity, period),
+    });
+    return card;
+  }
+
+  function scorePanel(trends) {
+    const distribution = trends.score_distribution;
+    const buckets = distribution.buckets;
+    const { medium, high } = distribution.thresholds;
+    const host = el("div");
+    const card = panel("How scores are spread",
+      `Each rule adds fixed points, so scores land on a few values. Medium starts at ${medium}, High at ${high} and raises an alert.`,
+      FinTrustCharts.legend(RISK_SERIES.map((item) => ({ name: item.name, cls: item.cls }))), host,
+      numbers([
+        { label: "Score", cell: (b) => `${b.from} to ${b.to}` },
+        { label: "Low", number: true, cell: (b) => whole.format(b.low) },
+        { label: "Medium", number: true, cell: (b) => whole.format(b.medium) },
+        { label: "High", number: true, cell: (b) => whole.format(b.high) },
+      ], buckets));
+    FinTrustCharts.columnChart(host, {
+      label: "Number of transactions in each score range",
+      labels: buckets.map((b) => `${b.from}`),
+      titles: buckets.map((b) => `Score ${b.from} to ${b.to}`),
+      series: RISK_SERIES,
+      stacked: true,
+      value: (i, key) => buckets[i][key],
+      tick: compactCount,
+      rows: (i) => [
+        { value: whole.format(buckets[i].low + buckets[i].medium + buckets[i].high), label: "transactions" },
+        ...RISK_SERIES.slice().reverse().filter((item) => buckets[i][item.key])
+          .map((item) => ({ value: whole.format(buckets[i][item.key]), label: item.name, key: "key-" + item.cls })),
+      ],
+      markers: [
+        { position: medium / distribution.bucket_size, label: `Medium ${medium}` },
+        { position: high / distribution.bucket_size, label: `High ${high}` },
+      ],
+    });
+    return card;
+  }
+
+  function alertPanel(trends, period) {
+    const flow = trends.alert_flow;
+    const rows = flow.periods;
+    const word = BUCKET_WORD[trends.granularity];
+    const series = [{ key: "raised", name: "Raised", cls: "raised" }, { key: "resolved", name: "Resolved", cls: "resolved" }];
+    const host = el("div");
+    const median = flow.median_hours_to_resolve;
+    const facts = el("dl", { class: "inline-facts" },
+      el("div", null, el("dt", { text: "Raised" }), el("dd", { text: whole.format(flow.raised) })),
+      el("div", null, el("dt", { text: "Resolved" }), el("dd", { text: whole.format(flow.resolved) })),
+      el("div", null, el("dt", { text: "Open now" }), el("dd", { text: whole.format(flow.open_now) })),
+      el("div", null, el("dt", { text: "Median time to resolve" }),
+        el("dd", { text: median === null ? "None resolved" : `${new Intl.NumberFormat("en-ZA", { maximumFractionDigits: 1 }).format(Number(median))} hours` })));
+    const card = panel("Alerts raised and resolved", `Is the compliance team keeping up? Alerts per ${word}, by when they were raised and when they were resolved.`,
+      facts, FinTrustCharts.legend(series.map((item) => ({ name: item.name, cls: item.cls }))), host,
+      numbers([
+        { label: titleCase(word), cell: (r) => bucketTitle(r.period_start, trends.granularity) },
+        { label: "Raised", number: true, cell: (r) => whole.format(r.raised) },
+        { label: "Resolved", number: true, cell: (r) => whole.format(r.resolved) },
+      ], rows));
+    if (!rows.length) { host.replaceWith(el("p", { class: "notice", text: "No alerts in this period." })); return card; }
+    FinTrustCharts.columnChart(host, {
+      label: `Alerts raised and resolved per ${word}`,
+      labels: rows.map((r) => bucketLabel(r.period_start, trends.granularity)),
+      titles: rows.map((r) => bucketTitle(r.period_start, trends.granularity)),
+      series,
+      stacked: false,
+      value: (i, key) => rows[i][key],
+      tick: compactCount,
+      rows: (i) => series.map((item) => ({ value: whole.format(rows[i][item.key]), label: item.name, key: "key-" + item.cls })),
+      onSelect: trends.granularity === "day" ? null : (i) => zoomInto(rows[i].period_start, trends.granularity, period),
+    });
+    return card;
+  }
+
+  function rankingPanel(trends, balanceHost, period) {
+    const ranking = trends.account_ranking;
+    const items = ranking.items;
+    const card = panel("Fraud ranking",
+      `Accounts by total risk points. Percentile is PERCENT_RANK over all ${whole.format(ranking.accounts_ranked)} accounts: 1.00 is the riskiest. A burst is ${ranking.burst_rule}.`);
+    if (!items.length) {
+      card.append(el("p", { class: "notice", text: "No accounts had transactions in this period." }));
+      balanceHost.replaceChildren();
+      return card;
+    }
+    const most = Math.max(1, ...items.map((row) => row.total_risk_points));
+    const buttons = [];
+    const select = (accountId) => {
+      state.balanceAccount = accountId;
+      for (const button of buttons) button.setAttribute("aria-pressed", String(button.dataset.account === accountId));
+      loadBalance(balanceHost, accountId, period);
+    };
+    const list = el("ol", { class: "ranking" }, items.map((row) => {
+      const fill = el("span", { class: "rank-fill" });
+      fill.style.width = (100 * row.total_risk_points / most) + "%";
+      const button = el("button", { type: "button", class: "rank-row", "data-account": row.account_id, "aria-pressed": "false",
+        "aria-label": `${row.account_id}, rank ${row.fraud_rank}, ${whole.format(row.total_risk_points)} risk points, percentile ${Number(row.fraud_percentile).toFixed(2)}`
+          + (row.burst_detected ? ", 30-day burst" : "") + ". Show its running balance.",
+        onclick: () => select(row.account_id) },
+      el("span", { class: "rank-no", text: row.fraud_rank }),
+      el("span", { class: "rank-id" }, el("span", { text: row.account_id }),
+        row.account_status === "FLAGGED" ? statusPill("FLAGGED") : null,
+        row.burst_detected ? el("span", { class: "burst" }, el("span", { "aria-hidden": "true", text: "▲" }), " 30-day burst") : null),
+      el("span", { class: "rank-track" }, fill),
+      el("span", { class: "rank-points", text: whole.format(row.total_risk_points) }),
+      el("span", { class: "rank-pct", text: Number(row.fraud_percentile).toFixed(2) }));
+      buttons.push(button);
+      return el("li", null, button);
+    }));
+    card.append(el("div", { class: "rank-head", "aria-hidden": "true" },
+      el("span", { text: "#" }), el("span", { text: "Account" }), el("span", { text: "Risk points" }), el("span"), el("span", { text: "Percentile" })),
+    list);
+    // Show the account chosen before, if it is still listed; otherwise the first burst, otherwise the top account.
+    const chosen = items.find((row) => row.account_id === state.balanceAccount)
+      || items.find((row) => row.burst_detected) || items[0];
+    select(chosen.account_id);
+    return card;
+  }
+
+  async function loadBalance(host, accountId, period) {
+    const existing = host.querySelector(".panel");
+    if (existing) existing.classList.add("refreshing");
+    else host.replaceChildren(panel("Running balance", null, el("p", { class: "notice", text: "Loading…" })));
+    let data;
+    try {
+      data = await api("GET", `/accounts/${encodeURIComponent(accountId)}/balance`, { params: { from: period.from, to: period.to } });
+    } catch (error) {
+      if (state.balanceAccount !== accountId) return;
+      if (error.status === 403) { handleFailure(error, $("page")); return; }
+      host.replaceChildren(panel("Running balance", null, failureNotice(error)));
+      return;
+    }
+    if (state.balanceAccount !== accountId || !host.isConnected) return;     // another account was chosen meanwhile
+
+    const points = data.points;
+    const summary = data.summary;
+    const chart = el("div");
+    const card = panel(`Running balance: ${data.account_id}`,
+      "Worked out by the window function in monthly_summary.sql from the account's whole history, so a chosen period starts from the true balance. Select a point to see why it was scored.");
+    if (data.account_status !== "ACTIVE") card.querySelector("h2").append(statusPill(data.account_status));
+    if (!points.length) {
+      card.append(el("p", { class: "notice", text: "No transactions on this account in this period." }));
+      host.replaceChildren(card);
+      return;
+    }
+    card.append(...[
+      el("dl", { class: "inline-facts" },
+        el("div", null, el("dt", { text: "Opening" }), el("dd", { text: formatMoney(summary.opening_balance) })),
+        el("div", null, el("dt", { text: "Money in" }), el("dd", { text: formatMoney(summary.credits) })),
+        el("div", null, el("dt", { text: "Money out" }), el("dd", { text: formatMoney(summary.debits) })),
+        el("div", null, el("dt", { text: "Closing" }), el("dd", { text: formatMoney(summary.closing_balance) }))),
+      FinTrustCharts.legend([
+        { name: "Balance after each transaction", cls: "balance", kind: "line" },
+        { name: `High-risk transaction (${whole.format(summary.high_risk_transactions)})`, cls: "high", kind: "dot" },
+      ]),
+      chart,
+      data.truncated ? el("p", { class: "lede small", text: `Showing the latest ${whole.format(points.length)} transactions.` }) : null,
+      numbers([
+        { label: "Date", cell: (p) => formatDate(p.tx_date) },
+        { label: "Transaction", cell: (p) => p.transaction_id },
+        { label: "Type", cell: (p) => titleCase(p.tx_type) },
+        { label: "Amount", number: true, cell: (p) => formatMoney(p.signed_amount) },
+        { label: "Balance after", number: true, cell: (p) => formatMoney(p.running_balance) },
+        { label: "Risk", cell: (p) => riskPill(p.risk_level) },
+      ], points),
+      el("p", { class: "panel-foot" }, el("button", { type: "button", class: "link-button",
+        onclick: () => { go("transactions"); views.transactions($("page"), { account_id: data.account_id }); } },
+      `See all transactions on ${data.account_id}`))].filter(Boolean));
+    host.replaceChildren(card);
+
+    FinTrustCharts.stepChart(chart, {
+      label: `Running balance of ${data.account_id}`,
+      points: points.map((p) => ({
+        t: new Date(String(p.tx_date).replace(" ", "T")).getTime(),
+        v: Number(p.running_balance),
+        highlight: p.risk_level === "HIGH",
+        title: `${formatDate(p.tx_date)} · ${p.transaction_id}`,
+        rows: [
+          { value: formatMoney(p.running_balance), label: "balance after", key: "key-balance" },
+          { value: (p.tx_type === "CREDIT" ? "+" : "−") + formatMoney(p.amount), label: titleCase(p.tx_type) },
+          { value: `${p.risk_score}`, label: `${titleCase(p.risk_level)} risk`, key: "key-" + p.risk_level.toLowerCase() },
+        ],
+      })),
+      // The line starts at the balance carried in from before the period, and runs to its end.
+      opening: period.from ? { t: Date.parse(period.from + "T00:00:00+02:00"), v: Number(summary.opening_balance) } : null,
+      until: period.to ? Math.min(Date.now(), Date.parse(period.to + "T23:59:59+02:00")) : null,
+      tick: compactMoney,
+      date: (t) => dayShort.format(new Date(t + 2 * 3600 * 1000)),      // South African calendar day
+      onSelect: (i) => openJourney(points[i].transaction_id, points[i]),
+    });
   }
 
   function statusPill(status) {

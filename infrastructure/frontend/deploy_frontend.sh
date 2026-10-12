@@ -110,7 +110,8 @@ echo "Bucket policy: readable by distribution $DISTRIBUTION_ID only"
 # ---------- 6. upload the files ----------
 # config.js is written here with the real API address, so nothing is hard-coded
 # in the repository. It contains no secret.
-cp "$ROOT/frontend/index.html" "$ROOT/frontend/styles.css" "$ROOT/frontend/app.js" "$ROOT/frontend/favicon.svg" "$WORK/"
+cp "$ROOT/frontend/index.html" "$ROOT/frontend/styles.css" "$ROOT/frontend/charts.js" "$ROOT/frontend/app.js" \
+   "$ROOT/frontend/favicon.svg" "$WORK/"
 cat > "$WORK/config.js" <<CONFIG
 // Written by infrastructure/frontend/deploy_frontend.sh. Holds no secret.
 window.FINTRUST_CONFIG = { apiUrl: "${API_URL}" };
@@ -122,6 +123,7 @@ upload() {   # upload <file> <content type>
 }
 upload index.html "text/html; charset=utf-8"
 upload styles.css "text/css; charset=utf-8"
+upload charts.js  "application/javascript; charset=utf-8"
 upload app.js     "application/javascript; charset=utf-8"
 upload config.js  "application/javascript; charset=utf-8"
 upload favicon.svg "image/svg+xml"

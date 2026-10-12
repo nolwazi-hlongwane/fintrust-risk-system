@@ -17,12 +17,13 @@ HOSTING = ROOT / "infrastructure" / "frontend"
 
 HTML = (FRONTEND / "index.html").read_text()
 SCRIPT = (FRONTEND / "app.js").read_text()
+CHARTS = (FRONTEND / "charts.js").read_text()
 STYLES = (FRONTEND / "styles.css").read_text()
 
 
 class TestNoSecretsInTheBrowserFiles:
     def test_no_api_key_or_account_specific_address_is_committed(self):
-        for text in (HTML, SCRIPT, STYLES, (FRONTEND / "config.js").read_text()):
+        for text in (HTML, SCRIPT, CHARTS, STYLES, (FRONTEND / "config.js").read_text()):
             assert not re.search(r"execute-api\.[a-z0-9-]+\.amazonaws\.com/", text.replace("…execute-api", ""))
             assert not re.search(r"\b[A-Za-z0-9]{40}\b", text)            # the shape of an API Gateway key
             assert not re.search(r"\b\d{12}\b", text)                     # an AWS account id
@@ -33,7 +34,8 @@ class TestNoSecretsInTheBrowserFiles:
 
     def test_api_key_is_kept_in_session_storage_only(self):
         assert "sessionStorage.setItem(STORAGE_KEY" in SCRIPT
-        assert "localStorage" not in SCRIPT and "document.cookie" not in SCRIPT
+        for code in (SCRIPT, CHARTS):
+            assert "localStorage" not in code and "document.cookie" not in code
 
     def test_api_key_field_is_a_password_field_that_is_not_remembered(self):
         field = re.search(r'<input id="api-key"[^>]*>', HTML).group(0)
@@ -47,9 +49,10 @@ class TestNoSecretsInTheBrowserFiles:
 class TestCrossSiteScripting:
     """Text from the API (a merchant name, a description) must never be able to run as script."""
 
-    def test_script_never_writes_html_from_data(self):
+    @pytest.mark.parametrize("code", [SCRIPT, CHARTS], ids=["app.js", "charts.js"])
+    def test_script_never_writes_html_from_data(self, code):
         for dangerous in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"):
-            assert dangerous not in SCRIPT, dangerous
+            assert dangerous not in code, dangerous
 
     def test_page_has_no_inline_script_or_inline_event_handlers(self):
         assert re.findall(r"<script(?![^>]*\bsrc=)", HTML) == []
@@ -58,7 +61,9 @@ class TestCrossSiteScripting:
 
     def test_page_has_no_inline_styles_so_the_content_security_policy_can_forbid_them(self):
         assert "<style" not in HTML and not re.search(r"\sstyle\s*=", HTML)
-        assert 'setAttribute("style"' not in SCRIPT
+        for code in (SCRIPT, CHARTS):
+            assert 'setAttribute("style"' not in code
+        assert "cssText" not in SCRIPT + CHARTS
 
     def test_page_loads_nothing_from_another_site(self):
         sources = re.findall(r'(?:src|href)="([^"]+)"', HTML)
@@ -69,18 +74,55 @@ class TestCrossSiteScripting:
 class TestRealApiOnly:
     def test_every_api_route_the_dashboard_calls_exists_in_the_api_definition(self):
         paths = json.loads((ROOT / "infrastructure" / "apigateway" / "openapi.json").read_text())["paths"]
-        called = set(re.findall(r'api\("(GET|POST)", [`"](/[a-z]+)', SCRIPT))
-        assert called == {("GET", "/health"), ("GET", "/insights"), ("GET", "/transactions"), ("GET", "/alerts"),
-                          ("GET", "/accounts"), ("POST", "/upload"), ("POST", "/flag"), ("POST", "/resolve")}
+        called = set()
+        for method, path in re.findall(r'api\("(GET|POST)", [`"](/[^`"]+)[`"]', SCRIPT):
+            # A path built in the code names its id; give it the name the API definition uses.
+            path = re.sub(r"^/transactions/\$\{[^}]+\}", "/transactions/{transaction_id}", path)
+            path = re.sub(r"^/accounts/\$\{[^}]+\}", "/accounts/{account_id}", path)
+            called.add((method, path))
+        assert called == {("GET", "/health"), ("GET", "/insights"), ("GET", "/insights/trends"), ("GET", "/transactions"),
+                          ("GET", "/transactions/{transaction_id}/journey"), ("GET", "/alerts"), ("GET", "/accounts"),
+                          ("GET", "/accounts/{account_id}/balance"), ("POST", "/upload"), ("POST", "/flag"),
+                          ("POST", "/resolve")}
         for method, path in called:
             assert method.lower() in paths[path], f"{method} {path}"
-        assert "/transactions/{transaction_id}/journey" in paths
+
+    def test_ids_put_into_a_path_are_encoded(self):
+        for built in re.findall(r"api\(\"GET\", `([^`]+)`", SCRIPT):
+            assert all(part.startswith("${encodeURIComponent(") for part in re.findall(r"\$\{[^}]+\}", built)), built
 
     def test_there_is_no_sample_data_in_the_script(self):
         """Nothing shown on screen is written into the code; it all comes from the API."""
-        code = SCRIPT.replace('placeholder: "ACC-1007"', "").replace('placeholder: "n.hlongwane"', "")
-        for marker in ("TXN-2026", "ACC-10", "lorem", "dummy", "88750", "hlongwane"):
+        code = SCRIPT.replace('placeholder: "ACC-1007"', "").replace('placeholder: "n.hlongwane"', "") + CHARTS
+        for marker in ("TXN-2026", "ACC-10", "lorem", "dummy", "88750", "hlongwane", "Math.random() *"):
             assert marker not in code, marker
+
+    def test_charts_draw_only_what_the_api_returned(self):
+        """The chart file has no fetch of its own: app.js gets the numbers, charts.js only draws them."""
+        assert "fetch(" not in CHARTS and "api(" not in CHARTS and "XMLHttpRequest" not in CHARTS
+        for series in ("trends.activity", "distribution.buckets", "flow.periods", "ranking.items", "data.points"):
+            assert series in SCRIPT, series
+
+
+class TestOverviewLayout:
+    """The fix for the Total value figure running into its neighbour (Week 15 Day 1)."""
+
+    def test_money_figure_gets_two_of_six_columns(self):
+        assert "grid-template-columns: repeat(6, minmax(0, 1fr))" in STYLES
+        assert ".figure.wide { grid-column: span 2; }" in STYLES
+        assert 'figure(formatMoney(data.totals.total_value), "Total value", { wide: true })' in SCRIPT
+
+    def test_a_figure_may_shrink_and_its_value_never_wraps_into_two_lines(self):
+        figure = re.search(r"\.figure \{[^}]*\}", STYLES).group(0)
+        value = re.search(r"\.figure-value \{[^}]*\}", STYLES).group(0)
+        assert "min-width: 0" in figure
+        assert "white-space: nowrap" in value and "clamp(" in value
+
+    def test_charts_script_loads_before_the_app(self):
+        assert HTML.index('src="charts.js"') < HTML.index('src="app.js"')
+
+    def test_every_chart_has_a_table_of_its_numbers(self):
+        assert SCRIPT.count("numbers([") == 4          # activity, scores, alerts and balance; the ranking is a list already
 
 
 class TestHosting:
@@ -122,10 +164,13 @@ class TestHosting:
         assert 'put_param cors_allowed_origin "$DASHBOARD_URL"' in script
         assert "put-bucket-website" not in script and "public-read" not in script
 
-    @pytest.mark.parametrize("name", ["index.html", "styles.css", "app.js", "config.js", "favicon.svg"])
+    @pytest.mark.parametrize("name", ["index.html", "styles.css", "charts.js", "app.js", "config.js", "favicon.svg"])
     def test_every_file_the_page_needs_is_uploaded(self, name):
         script = (HOSTING / "deploy_frontend.sh").read_text()
         assert re.search(rf"^upload {re.escape(name)}\s", script, re.M)
+        if name != "config.js":            # config.js is written by the script itself
+            copied = re.search(r'^cp ((?:.|\\\n)*?)"\$WORK/"', script, re.M).group(1)
+            assert f'"$ROOT/frontend/{name}"' in copied, f"{name} is uploaded but never copied"
 
 
 class TestAccessibilityBasics:
