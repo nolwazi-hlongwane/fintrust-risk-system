@@ -21,9 +21,26 @@ Write routes (Week 14 Day 1):
     POST /flag      flag an account for review (calls the flag_account database function)
     POST /resolve   mark an alert as resolved
 
+Session routes (Week 15 Day 2, secure sign-in):
+    POST /session     record a new sign-in (after Cognito has signed the person in)
+    GET /session      who is signed in, their role, and whether the session is still open
+    DELETE /session   sign out: the session ends, and the same token is refused from then on
+
+Who may call what (Week 15 Day 2)
+    API Gateway checks two things before this function runs: the API key (which
+    application is calling, for the usage plan) and the Cognito ID token (which
+    PERSON is calling). The token's claims arrive in
+    event.requestContext.authorizer.claims. This function then checks:
+      * the person's session is still open (fintrust/sessions.py, DynamoDB);
+      * the person's role, from their Cognito group:
+            compliance-analyst  may read everything and upload files
+            compliance-officer  may also resolve alerts and flag accounts
+    The checks are made here as well as in API Gateway on purpose (defence in
+    depth): a mistake in the gateway's settings can never open a route.
+
 This Lambda runs INSIDE the VPC: it reads the ledger in RDS as the database
-user fintrust_query, and the event store in DynamoDB through the gateway
-endpoint.
+user fintrust_query, and the event store and session store in DynamoDB through
+the gateway endpoint.
 
 Rules followed on every route:
     * Input is validated before any query runs; a bad parameter is a 400 with a
@@ -41,13 +58,14 @@ import json
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from fintrust import __version__, config, db, dynamo, validators
+from fintrust import __version__, config, db, dynamo, sessions, validators
 from fintrust.log import get_logger
 from fintrust.validators import ACCOUNT_ID_PATTERN, TRANSACTION_ID_PATTERN, mask_account
 
@@ -55,14 +73,25 @@ logger = get_logger("query")
 
 RISK_LEVELS = ("LOW", "MEDIUM", "HIGH")
 ALERT_STATUSES = ("OPEN", "RESOLVED")
+TX_TYPES = ("CREDIT", "DEBIT")
+CHANNELS = ("POS", "ONLINE", "ATM", "EFT", "MOBILE", "BRANCH")     # the same list as schema.sql
+ACCOUNT_TYPES = ("CHEQUE", "SAVINGS", "CREDIT", "BUSINESS")
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
 SAST = timezone(timedelta(hours=2))     # dates in the API are South African calendar days
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024      # Lambda accepts at most 6 MB in one request
 MAX_REASON_LENGTH = 500
+MAX_SEARCH_LENGTH = 60
+MAX_AMOUNT = Decimal("999999999999.99")  # the largest NUMERIC(14,2) value
 FILENAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 USER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,59}$")
+COUNTRY_PATTERN = re.compile(r"^[A-Z]{2}$")
+
+# Roles are Cognito groups. A person in neither group can sign in but can do nothing.
+ANALYST = "compliance-analyst"
+OFFICER = "compliance-officer"
+ROLES = (ANALYST, OFFICER)
 
 # PostgreSQL error codes raised on purpose by the flag_account function.
 ACCOUNT_NOT_FOUND = "P0002"             # no_data_found
@@ -90,8 +119,8 @@ def _headers():
     return {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": config.get("cors_allowed_origin"),
-        "Access-Control-Allow-Headers": "content-type,x-api-key",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "authorization,content-type,x-api-key",
+        "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
         "Cache-Control": "no-store",            # responses contain financial data
         "X-Content-Type-Options": "nosniff",
     }
@@ -119,8 +148,62 @@ def respond(status, body):
     return {"statusCode": status, "headers": _headers(), "body": json.dumps(body, default=str)}
 
 
-def error_response(status, code, message, request_id):
-    return respond(status, {"error": {"code": code, "message": message, "request_id": request_id}})
+def error_response(status, code, message, request_id, **extra):
+    return respond(status, {"error": {"code": code, "message": message, "request_id": request_id, **extra}})
+
+
+# ----------------------------------------------------------------------------
+# who is calling (Week 15 Day 2)
+# ----------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Caller:
+    """The signed-in person, read from the Cognito ID token's claims."""
+
+    username: str
+    name: str
+    roles: tuple
+    session_id: str
+    signed_in_at: int | None
+
+    @property
+    def is_officer(self):
+        return OFFICER in self.roles
+
+    def permissions(self):
+        """What the dashboard should offer this person. The API enforces the same rules."""
+        return {"read": bool(self.roles), "upload": bool(self.roles),
+                "resolve_alerts": self.is_officer, "flag_accounts": self.is_officer}
+
+
+def _groups(value):
+    """cognito:groups as a list. API Gateway passes the claim as text, for
+    example "compliance-officer" or "a,b" (some versions write "[a b]")."""
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [part for part in re.split(r"[\s,\[\]]+", str(value or "")) if part]
+
+
+def caller_from(event):
+    """The Caller for a request, or None if API Gateway passed no identity.
+
+    The claims are trustworthy because API Gateway verified the token's
+    signature, issuer and expiry before the request reached this function; a
+    client cannot write requestContext itself.
+    """
+    claims = ((event.get("requestContext") or {}).get("authorizer") or {}).get("claims") or {}
+    username = str(claims.get("cognito:username") or "").strip().lower()
+    session_id = str(claims.get("origin_jti") or "").strip()
+    if not username or not session_id:
+        return None
+    if not USER_PATTERN.match(username):
+        raise ApiError(403, "FORBIDDEN", "This username cannot be used with the API")
+    try:
+        signed_in_at = int(claims["auth_time"]) if claims.get("auth_time") else None
+    except (TypeError, ValueError):
+        signed_in_at = None
+    roles = tuple(role for role in ROLES if role in _groups(claims.get("cognito:groups")))
+    name = str(claims.get("name") or username).strip()[:120]
+    return Caller(username, name, roles, session_id, signed_in_at)
 
 
 # ----------------------------------------------------------------------------
@@ -164,6 +247,80 @@ def _where(conditions):
     return ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
 
+def _choice(params, name, allowed, label=None):
+    """An optional value that must be one of `allowed` (upper-cased), or None."""
+    value = (params.get(name) or "").strip().upper()
+    if not value:
+        return None
+    if value not in allowed:
+        raise ApiError(400, "VALIDATION_ERROR", f"{label or name} must be one of {', '.join(allowed)}")
+    return value
+
+
+def _sort(params, sorts, default):
+    """The ORDER BY for the `sort` parameter.
+
+    The caller chooses a NAME from a fixed list; the SQL for each name is
+    written here. Text from the request is never put into the SQL, so sorting
+    cannot be used for SQL injection.
+    """
+    chosen = (params.get("sort") or default).strip().lower()
+    if chosen not in sorts:
+        raise ApiError(400, "VALIDATION_ERROR", f"sort must be one of {', '.join(sorts)}")
+    return chosen, sorts[chosen]
+
+
+def _amount(params, name):
+    """An optional rand amount (0 or more, at most two decimal places), or None."""
+    raw = (params.get(name) or "").strip().replace(" ", "")
+    if not raw:
+        return None
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        raise ApiError(400, "VALIDATION_ERROR", f"{name} must be a number, for example 50000 or 1250.50") from None
+    if not value.is_finite() or value < 0 or value > MAX_AMOUNT or value != value.quantize(Decimal("0.01")):
+        raise ApiError(400, "VALIDATION_ERROR", f"{name} must be between 0 and {MAX_AMOUNT} with at most two decimals")
+    return value
+
+
+def _contains(params, name):
+    """An optional search text, as a LIKE pattern that matches it anywhere.
+
+    The LIKE wildcards % and _ (and the escape character itself) are escaped,
+    so a search for "100%" finds exactly "100%" and cannot match everything.
+    """
+    raw = (params.get(name) or "").strip()
+    if not raw:
+        return None
+    if len(raw) > MAX_SEARCH_LENGTH:
+        raise ApiError(400, "VALIDATION_ERROR", f"{name} must be at most {MAX_SEARCH_LENGTH} characters")
+    if any(ord(character) < 32 for character in raw):
+        raise ApiError(400, "VALIDATION_ERROR", f"{name} contains characters that are not allowed")
+    escaped = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _account_id(params, name="account_id"):
+    """An optional account id. "1007" is accepted as shorthand for "ACC-1007"."""
+    value = (params.get(name) or "").strip().upper()
+    if not value:
+        return None
+    if value.isdigit():
+        value = f"ACC-{value}"
+    if not ACCOUNT_ID_PATTERN.match(value):
+        raise ApiError(400, "VALIDATION_ERROR", "account_id must look like ACC-1234")
+    return value
+
+
+def _page(params):
+    return _integer(params, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT), _integer(params, "offset", 0, 0, 1_000_000)
+
+
+def _pagination(limit, offset, items, total):
+    return {"limit": limit, "offset": offset, "total": total, "has_more": offset + len(items) < total}
+
+
 def _raw_body(event):
     """The request body as bytes (API Gateway may deliver it base64-encoded)."""
     body = event.get("body") or ""
@@ -203,68 +360,98 @@ def _text_field(data, name, max_length, required=True):
 # ----------------------------------------------------------------------------
 # routes
 # ----------------------------------------------------------------------------
-def get_health(_event):
+def get_health(_event, _caller=None):
     if db.is_healthy():
         return respond(200, {"status": "ok", "database": "ok", "version": __version__})
     return respond(503, {"status": "degraded", "database": "unavailable", "version": __version__})
 
 
-def get_transactions(event):
+# Sort orders the dashboard offers. Every order ends with the newest first and
+# then the id, so rows that tie (two equal amounts) always come back in the
+# same order and paging through them never skips or repeats a row.
+_NEWEST = "tx_date DESC, transaction_id DESC"
+TRANSACTION_SORTS = {
+    "newest": _NEWEST,
+    "oldest": "tx_date ASC, transaction_id ASC",
+    "amount_desc": f"amount DESC, {_NEWEST}",
+    "amount_asc": f"amount ASC, {_NEWEST}",
+    "account_asc": f"account_id ASC, {_NEWEST}",
+    "account_desc": f"account_id DESC, {_NEWEST}",
+    # lower(): "acme" and "Acme" sort together. Rows with no merchant go last either way.
+    "merchant_asc": f"lower(merchant_name) ASC NULLS LAST, {_NEWEST}",
+    "merchant_desc": f"lower(merchant_name) DESC NULLS LAST, {_NEWEST}",
+    "score_desc": f"risk_score DESC, {_NEWEST}",
+    "score_asc": f"risk_score ASC, {_NEWEST}",
+}
+
+
+def get_transactions(event, _caller=None):
     params = event.get("queryStringParameters") or {}
     conditions, values = [], []
 
-    account_id = (params.get("account_id") or "").strip().upper()
+    def where(condition, value):
+        conditions.append(condition)
+        values.append(value)
+
+    account_id = _account_id(params)
     if account_id:
-        if not ACCOUNT_ID_PATTERN.match(account_id):
-            raise ApiError(400, "VALIDATION_ERROR", "account_id must look like ACC-1234")
-        conditions.append("account_id = %s")
-        values.append(account_id)
+        where("account_id = %s", account_id)
 
     transaction_id = (params.get("transaction_id") or "").strip()
     if transaction_id:
         if not TRANSACTION_ID_PATTERN.match(transaction_id):
             raise ApiError(400, "VALIDATION_ERROR", "transaction_id is not in a valid format")
-        conditions.append("transaction_id = %s")
-        values.append(transaction_id)
+        where("transaction_id = %s", transaction_id)
 
-    risk_level = (params.get("risk_level") or "").strip().upper()
-    if risk_level:
-        if risk_level not in RISK_LEVELS:
-            raise ApiError(400, "VALIDATION_ERROR", f"risk_level must be one of {', '.join(RISK_LEVELS)}")
-        conditions.append("risk_level = %s")
-        values.append(risk_level)
+    for name, allowed in (("risk_level", RISK_LEVELS), ("tx_type", TX_TYPES), ("channel", CHANNELS)):
+        chosen = _choice(params, name, allowed)
+        if chosen:
+            where(f"{name} = %s", chosen)
+
+    country = (params.get("country_code") or "").strip().upper()
+    if country:
+        if not COUNTRY_PATTERN.match(country):
+            raise ApiError(400, "VALIDATION_ERROR", "country_code must be two letters, for example ZA or GB")
+        where("country_code = %s", country)
+
+    minimum, maximum = _amount(params, "min_amount"), _amount(params, "max_amount")
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise ApiError(400, "VALIDATION_ERROR", "min_amount must not be more than max_amount")
+    if minimum is not None:
+        where("amount >= %s", minimum)
+    if maximum is not None:
+        where("amount <= %s", maximum)
+
+    merchant = _contains(params, "merchant")
+    if merchant:
+        where("merchant_name ILIKE %s ESCAPE '\\'", merchant)
 
     _start_day, _end_day, start, end = _period(params)
     if start:
-        conditions.append("tx_date >= %s")
-        values.append(start)
+        where("tx_date >= %s", start)
     if end:
-        conditions.append("tx_date < %s")
-        values.append(end)
+        where("tx_date < %s", end)
 
-    limit = _integer(params, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT)
-    offset = _integer(params, "offset", 0, 0, 1_000_000)
-    where = _where(conditions)     # built only from the fixed strings above, never from user input
+    sort, order_by = _sort(params, TRANSACTION_SORTS, "newest")
+    limit, offset = _page(params)
+    where_sql = _where(conditions)     # built only from the fixed strings above, never from user input
 
     with db.transaction() as cursor:
-        cursor.execute(f"SELECT count(*) AS total FROM transactions {where}", values)
+        cursor.execute(f"SELECT count(*) AS total FROM transactions {where_sql}", values)
         total = cursor.fetchone()["total"]
         cursor.execute(
             f"""
             SELECT transaction_id, account_id, tx_date, amount, currency, tx_type, channel,
                    merchant_name, country_code, description, risk_score, risk_level
-            FROM transactions {where}
-            ORDER BY tx_date DESC, transaction_id DESC
+            FROM transactions {where_sql}
+            ORDER BY {order_by}
             LIMIT %s OFFSET %s
             """,
             [*values, limit, offset],
         )
         items = [dict(row) for row in cursor.fetchall()]
 
-    return respond(200, {
-        "items": items,
-        "pagination": {"limit": limit, "offset": offset, "total": total, "has_more": offset + len(items) < total},
-    })
+    return respond(200, {"items": items, "sort": sort, "pagination": _pagination(limit, offset, items, total)})
 
 
 def journey_status(score, events):
@@ -313,7 +500,7 @@ def _ledger_score(transaction_id):
     }
 
 
-def get_journey(event):
+def get_journey(event, _caller=None):
     transaction_id = ((event.get("pathParameters") or {}).get("transaction_id") or "").strip()
     if not TRANSACTION_ID_PATTERN.match(transaction_id):
         raise ApiError(400, "VALIDATION_ERROR", "transaction_id is not in a valid format")
@@ -348,7 +535,7 @@ def get_journey(event):
     })
 
 
-def get_insights(event):
+def get_insights(event, _caller=None):
     params = event.get("queryStringParameters") or {}
     start_day, end_day, start, end = _period(params)
     conditions, values = [], []
@@ -521,7 +708,7 @@ def _chart_span(cursor, start_day, end_day, start, end):
     return first_day, last_day
 
 
-def get_trends(event):
+def get_trends(event, _caller=None):
     """GET /insights/trends: the four series behind the Overview charts.
 
     activity            transactions per day/week/month, split Low/Medium/High, with their value
@@ -725,7 +912,7 @@ BALANCE_SQL = """
 """
 
 
-def get_account_balance(event):
+def get_account_balance(event, _caller=None):
     """GET /accounts/{account_id}/balance: the account's running balance, one point per transaction."""
     account_id = ((event.get("pathParameters") or {}).get("account_id") or "").strip().upper()
     if not ACCOUNT_ID_PATTERN.match(account_id):
@@ -772,9 +959,19 @@ def get_account_balance(event):
 
 
 ACCOUNT_STATUSES = ("ACTIVE", "FLAGGED", "CLOSED")
+ACCOUNT_SORTS = {
+    "risk_desc": "total_risk_points DESC, account_id",
+    "risk_asc": "total_risk_points ASC, account_id",
+    "account_asc": "account_id ASC",
+    "account_desc": "account_id DESC",
+    "recent": "last_transaction_at DESC NULLS LAST, account_id",
+    "transactions_desc": "transaction_count DESC, account_id",
+    "high_risk_desc": "high_risk_count DESC, total_risk_points DESC, account_id",
+    "open_alerts_desc": "open_alerts DESC, total_risk_points DESC, account_id",
+}
 
 
-def get_accounts(event):
+def get_accounts(event, _caller=None):
     """Accounts ranked by risk, read from the v_risk_dashboard view (sql/views.sql).
 
     The view holds no customer names or contact details, and the API needs to
@@ -782,14 +979,20 @@ def get_accounts(event):
     """
     params = event.get("queryStringParameters") or {}
     conditions, values = [], []
-    status = (params.get("status") or "").strip().upper()
+    status = _choice(params, "status", ACCOUNT_STATUSES)
     if status:
-        if status not in ACCOUNT_STATUSES:
-            raise ApiError(400, "VALIDATION_ERROR", f"status must be one of {', '.join(ACCOUNT_STATUSES)}")
         conditions.append("account_status = %s")
         values.append(status)
-    limit = _integer(params, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT)
-    offset = _integer(params, "offset", 0, 0, 1_000_000)
+    account_type = _choice(params, "account_type", ACCOUNT_TYPES)
+    if account_type:
+        conditions.append("account_type = %s")
+        values.append(account_type)
+    search = _contains(params, "search")
+    if search:
+        conditions.append("account_id ILIKE %s ESCAPE '\\'")
+        values.append(search)
+    sort, order_by = _sort(params, ACCOUNT_SORTS, "risk_desc")
+    limit, offset = _page(params)
     where = _where(conditions)
 
     with db.transaction() as cursor:
@@ -801,34 +1004,57 @@ def get_accounts(event):
                    high_risk_count, medium_risk_count, highest_risk_score, total_risk_points,
                    last_transaction_at, last_high_risk_at, open_alerts, resolved_alerts, manual_flags
             FROM v_risk_dashboard {where}
-            ORDER BY total_risk_points DESC, account_id
+            ORDER BY {order_by}
             LIMIT %s OFFSET %s
             """,
             [*values, limit, offset],
         )
         items = [dict(row) for row in cursor.fetchall()]
 
-    return respond(200, {
-        "items": items,
-        "pagination": {"limit": limit, "offset": offset, "total": total, "has_more": offset + len(items) < total},
-    })
+    return respond(200, {"items": items, "sort": sort, "pagination": _pagination(limit, offset, items, total)})
 
 
-def get_alerts(event):
+_RAISED_NEWEST = "a.created_at DESC, a.alert_id DESC"
+ALERT_SORTS = {
+    "newest": _RAISED_NEWEST,
+    "oldest": "a.created_at ASC, a.alert_id ASC",
+    "amount_desc": f"t.amount DESC, {_RAISED_NEWEST}",
+    "amount_asc": f"t.amount ASC, {_RAISED_NEWEST}",
+    "score_desc": f"t.risk_score DESC, {_RAISED_NEWEST}",
+    "account_asc": f"t.account_id ASC, {_RAISED_NEWEST}",
+    "account_desc": f"t.account_id DESC, {_RAISED_NEWEST}",
+}
+
+
+def get_alerts(event, _caller=None):
     params = event.get("queryStringParameters") or {}
     conditions, values = [], []
-    status = (params.get("status") or "").strip().upper()
+    status = _choice(params, "status", ALERT_STATUSES)
     if status:
-        if status not in ALERT_STATUSES:
-            raise ApiError(400, "VALIDATION_ERROR", f"status must be one of {', '.join(ALERT_STATUSES)}")
         conditions.append("a.status = %s")
         values.append(status)
-    limit = _integer(params, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT)
-    offset = _integer(params, "offset", 0, 0, 1_000_000)
+    account_id = _account_id(params)
+    if account_id:
+        conditions.append("t.account_id = %s")
+        values.append(account_id)
+    # from/to filter by the day the alert was RAISED.
+    _start_day, _end_day, start, end = _period(params)
+    if start:
+        conditions.append("a.created_at >= %s")
+        values.append(start)
+    if end:
+        conditions.append("a.created_at < %s")
+        values.append(end)
+    sort, order_by = _sort(params, ALERT_SORTS, "newest")
+    limit, offset = _page(params)
     where = _where(conditions)
 
     with db.transaction() as cursor:
-        cursor.execute(f"SELECT count(*) AS total FROM alerts a {where}", values)
+        cursor.execute(
+            f"SELECT count(*) AS total FROM alerts a "
+            f"JOIN transactions t ON t.transaction_id = a.transaction_id {where}",
+            values,
+        )
         total = cursor.fetchone()["total"]
         cursor.execute(
             f"""
@@ -838,20 +1064,17 @@ def get_alerts(event):
             FROM alerts a
             JOIN transactions t ON t.transaction_id = a.transaction_id
             {where}
-            ORDER BY a.created_at DESC, a.alert_id DESC
+            ORDER BY {order_by}
             LIMIT %s OFFSET %s
             """,
             [*values, limit, offset],
         )
         items = [dict(row) for row in cursor.fetchall()]
 
-    return respond(200, {
-        "items": items,
-        "pagination": {"limit": limit, "offset": offset, "total": total, "has_more": offset + len(items) < total},
-    })
+    return respond(200, {"items": items, "sort": sort, "pagination": _pagination(limit, offset, items, total)})
 
 
-def post_upload(event):
+def post_upload(event, caller):
     """Accept a CSV file and return 202 immediately.
 
     The file is stored in the raw bucket. S3 then invokes the ingest Lambda
@@ -885,12 +1108,15 @@ def post_upload(event):
     # overwrite another file or write outside the uploads/ prefix.
     key = f"uploads/{datetime.now(SAST):%Y-%m-%d}/{upload_id[:8]}-{filename}"
     try:
-        _s3.put_object(Bucket=config.get("raw_bucket"), Key=key, Body=body, ContentType="text/csv")
+        # Who sent the file travels with it as object metadata, so the ingest
+        # logs and the S3 object itself both say who uploaded it.
+        _s3.put_object(Bucket=config.get("raw_bucket"), Key=key, Body=body, ContentType="text/csv",
+                       Metadata={"uploaded-by": caller.username})
     except (ClientError, BotoCoreError) as error:
         logger.error("upload_store_failed", error=str(error))
         raise ApiError(503, "SERVICE_UNAVAILABLE", "The file could not be stored. Try again shortly.") from error
 
-    logger.info("upload_accepted", upload_id=upload_id, object_key=key, size_bytes=len(body))
+    logger.info("upload_accepted", upload_id=upload_id, object_key=key, size_bytes=len(body), actor=caller.username)
     return respond(202, {
         "status": "ACCEPTED",
         "upload_id": upload_id,
@@ -899,7 +1125,7 @@ def post_upload(event):
     })
 
 
-def post_flag(event):
+def post_flag(event, caller):
     data = _json_body(event)
     account_id = str(data.get("account_id") or "").strip().upper()
     if not ACCOUNT_ID_PATTERN.match(account_id):
@@ -909,7 +1135,9 @@ def post_flag(event):
     try:
         # One call, one database transaction: the risk event and the status
         # change happen together inside the flag_account function.
-        row = db.fetch_one("SELECT flag_account(%s, %s) AS risk_event_id", (account_id, reason))
+        # The officer's name comes from their sign-in, never from the request
+        # body, so nobody can flag an account in someone else's name.
+        row = db.fetch_one("SELECT flag_account(%s, %s, %s) AS risk_event_id", (account_id, reason, caller.username))
     except db.DatabaseError as error:
         if error.pgcode == ACCOUNT_NOT_FOUND:
             raise ApiError(404, "NOT_FOUND", f"Account {account_id} does not exist") from error
@@ -917,19 +1145,20 @@ def post_flag(event):
             raise ApiError(409, "CONFLICT", f"Account {account_id} is closed and cannot be flagged") from error
         raise
 
-    logger.info("account_flagged", account=mask_account(account_id), risk_event_id=row["risk_event_id"])
-    return respond(201, {"risk_event_id": row["risk_event_id"], "account_id": account_id, "account_status": "FLAGGED"})
+    logger.info("account_flagged", account=mask_account(account_id), risk_event_id=row["risk_event_id"],
+                actor=caller.username)
+    return respond(201, {"risk_event_id": row["risk_event_id"], "account_id": account_id, "account_status": "FLAGGED",
+                         "flagged_by": caller.username})
 
 
-def post_resolve(event):
+def post_resolve(event, caller):
     data = _json_body(event)
     alert_id = data.get("alert_id")
     if isinstance(alert_id, bool) or not isinstance(alert_id, int) or alert_id < 1:
         raise ApiError(400, "VALIDATION_ERROR", "alert_id must be a positive whole number")
-    resolved_by = str(data.get("resolved_by") or "").strip()
-    if not USER_PATTERN.match(resolved_by):
-        raise ApiError(400, "VALIDATION_ERROR",
-                       "resolved_by must be 2 to 60 letters, digits, dots, dashes or underscores")
+    # Who resolved it is the signed-in officer. A resolved_by value in the body
+    # (older API clients sent one) is ignored, so the record cannot be forged.
+    resolved_by = caller.username
     note = _text_field(data, "resolution_note", MAX_REASON_LENGTH, required=False)
 
     with db.transaction() as cursor:
@@ -958,8 +1187,43 @@ def post_resolve(event):
     return respond(200, dict(updated))
 
 
+# ----------------------------------------------------------------------------
+# sessions (Week 15 Day 2)
+# ----------------------------------------------------------------------------
+def _session_body(caller, item):
+    return {**sessions.public_view(item), "permissions": caller.permissions()}
+
+
+def post_session(event, caller):
+    """Record a sign-in. The dashboard calls this once, straight after Cognito
+    returns the person to it. Calling it again for the same sign-in is harmless."""
+    if not caller.roles:
+        raise ApiError(403, "NO_ROLE", "Your sign-in worked, but your account has no role yet. "
+                                       "Ask an administrator to add you to the compliance team.")
+    headers = event.get("headers") or {}
+    user_agent = next((value for name, value in headers.items() if name.lower() == "user-agent"), "")
+    item, created = sessions.start(caller.session_id, caller.username, caller.roles, caller.name, user_agent,
+                                   caller.signed_in_at)
+    return respond(201 if created else 200, _session_body(caller, item))
+
+
+def get_session(_event, caller):
+    """Who is signed in, and whether the session is open. Also the dashboard's
+    heartbeat: an active person's session is kept open by this call."""
+    return respond(200, _session_body(caller, sessions.require_active(caller.session_id, caller.username)))
+
+
+def delete_session(_event, caller):
+    """Sign out. From now on this token is refused, even though it has not expired."""
+    sessions.end(caller.session_id, caller.username, sessions.SIGNED_OUT)
+    return respond(200, {"status": sessions.ENDED, "end_reason": sessions.SIGNED_OUT})
+
+
 ROUTES = {
     ("GET", "/health"): get_health,
+    ("POST", "/session"): post_session,
+    ("GET", "/session"): get_session,
+    ("DELETE", "/session"): delete_session,
     ("GET", "/transactions"): get_transactions,
     ("GET", "/transactions/{transaction_id}/journey"): get_journey,
     ("GET", "/insights"): get_insights,
@@ -971,6 +1235,44 @@ ROUTES = {
     ("POST", "/flag"): post_flag,
     ("POST", "/resolve"): post_resolve,
 }
+
+# Who may call each route. Anything not listed needs an open session and a role.
+PUBLIC = "public"              # API key only: a health check reveals nothing
+SIGNED_IN = "signed_in"        # a valid sign-in; the session itself is checked by the route
+OFFICERS = "officers"          # decisions that change the record
+ACCESS = {
+    ("GET", "/health"): PUBLIC,
+    ("POST", "/session"): SIGNED_IN,
+    ("GET", "/session"): SIGNED_IN,
+    ("DELETE", "/session"): SIGNED_IN,
+    ("POST", "/flag"): OFFICERS,
+    ("POST", "/resolve"): OFFICERS,
+}
+SESSION_MESSAGES = {
+    None: "Your session has not started. Sign in again.",
+    sessions.SIGNED_OUT: "You signed out. Sign in again to continue.",
+    sessions.IDLE: "You were signed out after a period without activity. Sign in again to continue.",
+    sessions.EXPIRED: "Your session reached its time limit. Sign in again to continue.",
+    sessions.REVOKED: "Your session was ended by an administrator. Sign in again, or contact your administrator.",
+}
+
+
+def authorise(method, resource, caller):
+    """Check who is calling before the route runs. Returns the Caller (or None for a public route)."""
+    access = ACCESS.get((method, resource))
+    if access == PUBLIC:
+        return None
+    if caller is None:
+        raise ApiError(401, "NOT_SIGNED_IN", "Sign in to use the FinTrust API.")
+    if access == SIGNED_IN:
+        return caller
+    if not caller.roles:
+        raise ApiError(403, "NO_ROLE",
+                       "Your account has no role yet. Ask an administrator to add you to the compliance team.")
+    if access == OFFICERS and not caller.is_officer:
+        raise ApiError(403, "FORBIDDEN", "Only a compliance officer can do this. Your role is compliance analyst.")
+    sessions.require_active(caller.session_id, caller.username)
+    return caller
 
 
 def handler(event, context):
@@ -989,9 +1291,18 @@ def handler(event, context):
             route = ROUTES.get((method, resource))
             if route is None:
                 raise ApiError(404, "NOT_FOUND", f"No route {method} {resource}")
-            response = route(event)
+            caller = caller_from(event)
+            if caller:
+                log = log.bind(actor=caller.username)        # every log line says who did it, refused or not
+            response = route(event, authorise(method, resource, caller))
     except ApiError as error:
         response = error_response(error.status, error.code, error.message, request_id)
+    except sessions.SessionEnded as ended:
+        response = error_response(401, "SESSION_ENDED", SESSION_MESSAGES.get(ended.reason, SESSION_MESSAGES[None]),
+                                  request_id, reason=ended.reason or "NOT_STARTED")
+    except (sessions.SessionError, dynamo.DynamoError):
+        response = error_response(503, "SERVICE_UNAVAILABLE", "A service the API depends on is not available. "
+                                  "Try again shortly.", request_id)
     except db.DatabaseUnavailable:
         response = error_response(503, "SERVICE_UNAVAILABLE", "The database is not available. Try again shortly.",
                                   request_id)

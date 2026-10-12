@@ -14,6 +14,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from fintrust import db, query
+from tests.conftest import signed_in
 
 RAW_BUCKET = "fintrust-capstone-raw-test"
 HEADER = "transaction_id,account_id,tx_date,amount,currency,tx_type,channel,merchant_name,country_code,description"
@@ -30,7 +31,7 @@ def call(method, resource, body=None, params=None, base64_encoded=False):
         body = json.dumps(body)
     event = {
         "httpMethod": method, "resource": resource, "queryStringParameters": params, "pathParameters": None,
-        "body": body, "isBase64Encoded": base64_encoded, "requestContext": {"requestId": "api-request-id"},
+        "body": body, "isBase64Encoded": base64_encoded, "requestContext": signed_in("api-request-id"),
     }
     response = query.handler(event, Context())
     return response["statusCode"], json.loads(response["body"]) if response["body"] else None
@@ -154,16 +155,23 @@ class TestFlag:
         cursor.fetchone.return_value = {"risk_event_id": 381}
         status, body = call("POST", "/flag", {"account_id": "acc-1007", "reason": "  Four high-risk payments  "})
         assert status == 201
-        assert body == {"risk_event_id": 381, "account_id": "ACC-1007", "account_status": "FLAGGED"}
+        assert body == {"risk_event_id": 381, "account_id": "ACC-1007", "account_status": "FLAGGED",
+                        "flagged_by": "t.nkosi"}
+        # Who flagged it is the signed-in officer, passed as a parameter like every other value.
         cursor.execute.assert_called_once_with(
-            "SELECT flag_account(%s, %s) AS risk_event_id", ("ACC-1007", "Four high-risk payments")
+            "SELECT flag_account(%s, %s, %s) AS risk_event_id", ("ACC-1007", "Four high-risk payments", "t.nkosi")
         )
+
+    def test_a_name_in_the_body_cannot_change_who_flagged_it(self, cursor):
+        cursor.fetchone.return_value = {"risk_event_id": 382}
+        call("POST", "/flag", {"account_id": "ACC-1007", "reason": "x", "flagged_by": "someone.else"})
+        assert cursor.execute.call_args.args[1][2] == "t.nkosi"
 
     @pytest.mark.parametrize(
         "payload, message",
         [
             ({"reason": "x"}, "account_id must look like ACC-1234"),
-            ({"account_id": "1007", "reason": "x"}, "account_id must look like ACC-1234"),
+            ({"account_id": "AC-1007", "reason": "x"}, "account_id must look like ACC-1234"),
             ({"account_id": "ACC-1007"}, "reason is required"),
             ({"account_id": "ACC-1007", "reason": "   "}, "reason is required"),
             ({"account_id": "ACC-1007", "reason": 42}, "reason must be text"),
@@ -183,7 +191,7 @@ class TestFlag:
     def test_personal_information_in_the_reason_is_redacted(self, cursor):
         cursor.fetchone.return_value = {"risk_event_id": 1}
         call("POST", "/flag", {"account_id": "ACC-1007", "reason": "Call customer on 082 555 0101"})
-        assert cursor.execute.call_args.args[1] == ("ACC-1007", "Call customer on [REDACTED]")
+        assert cursor.execute.call_args.args[1] == ("ACC-1007", "Call customer on [REDACTED]", "t.nkosi")
 
     def test_unknown_account_is_404(self, cursor):
         cursor.execute.side_effect = db.DatabaseError("Account ACC-0000 does not exist", "P0002")
@@ -211,18 +219,22 @@ class TestFlag:
 class TestResolve:
     def test_open_alert_is_resolved(self, cursor):
         cursor.fetchone.return_value = {"alert_id": 57, "status": "RESOLVED", "resolved_at": "2026-10-07T08:00:00Z",
-                                        "resolved_by": "n.hlongwane"}
-        status, body = call("POST", "/resolve", {"alert_id": 57, "resolved_by": "n.hlongwane",
-                                                 "resolution_note": "Confirmed with customer"})
+                                        "resolved_by": "t.nkosi"}
+        status, body = call("POST", "/resolve", {"alert_id": 57, "resolution_note": "Confirmed with customer"})
         assert status == 200 and body["status"] == "RESOLVED" and body["alert_id"] == 57
         sql, values = cursor.execute.call_args.args
         assert "status = 'OPEN'" in sql                      # only an open alert can be resolved
-        assert values == ("n.hlongwane", "Confirmed with customer", 57)
+        assert values == ("t.nkosi", "Confirmed with customer", 57)
+
+    def test_resolved_by_is_the_signed_in_officer_whatever_the_body_says(self, cursor):
+        cursor.fetchone.return_value = {"alert_id": 57, "status": "RESOLVED"}
+        call("POST", "/resolve", {"alert_id": 57, "resolved_by": "someone.else"})
+        assert cursor.execute.call_args.args[1][0] == "t.nkosi"
 
     def test_note_is_optional(self, cursor):
         cursor.fetchone.return_value = {"alert_id": 57, "status": "RESOLVED"}
-        assert call("POST", "/resolve", {"alert_id": 57, "resolved_by": "n.hlongwane"})[0] == 200
-        assert cursor.execute.call_args.args[1] == ("n.hlongwane", None, 57)
+        assert call("POST", "/resolve", {"alert_id": 57})[0] == 200
+        assert cursor.execute.call_args.args[1] == ("t.nkosi", None, 57)
 
     def test_unknown_alert_is_404(self, cursor):
         cursor.fetchone.side_effect = [None, None]
@@ -242,9 +254,6 @@ class TestResolve:
             ({"alert_id": 0, "resolved_by": "n.hlongwane"}, "alert_id must be a positive whole number"),
             ({"alert_id": True, "resolved_by": "n.hlongwane"}, "alert_id must be a positive whole number"),
             ({"alert_id": 5.5, "resolved_by": "n.hlongwane"}, "alert_id must be a positive whole number"),
-            ({"alert_id": 57}, "resolved_by must be"),
-            ({"alert_id": 57, "resolved_by": "x"}, "resolved_by must be"),
-            ({"alert_id": 57, "resolved_by": "Robert'); DROP TABLE alerts;--"}, "resolved_by must be"),
             ({"alert_id": 57, "resolved_by": "n.hlongwane", "resolution_note": "x" * 501}, "at most 500 characters"),
         ],
     )
@@ -293,5 +302,22 @@ class TestRoutesMatchTheApiDefinition:
             assert "options" in methods, f"{path} has no OPTIONS method for browsers"
             assert "security" not in methods["options"]
             for method, operation in methods.items():
-                if method != "options":
-                    assert operation["security"] == [{"api_key": []}], f"{method} {path} is not protected"
+                if method == "options":
+                    continue
+                # Both in ONE requirement object means both are required (OpenAPI "AND").
+                expected = [{"api_key": []}] if path == "/health" else [{"api_key": [], "cognito": []}]
+                assert operation["security"] == expected, f"{method} {path} is not protected"
+
+    def test_the_cognito_authorizer_points_at_the_user_pool(self):
+        definition = json.loads(
+            (Path(__file__).resolve().parents[2] / "infrastructure" / "apigateway" / "openapi.json").read_text()
+        )
+        scheme = definition["components"]["securitySchemes"]["cognito"]
+        assert scheme["name"] == "Authorization" and scheme["in"] == "header"
+        assert scheme["x-amazon-apigateway-authorizer"] == {"type": "cognito_user_pools",
+                                                             "providerARNs": ["__USER_POOL_ARN__"]}
+
+    def test_route_access_rules_match_the_api_definition(self):
+        """Only /health is public, and every route the Lambda knows has an access rule."""
+        assert {route for route, access in query.ACCESS.items() if access == query.PUBLIC} == {("GET", "/health")}
+        assert set(query.ACCESS) <= set(query.ROUTES)

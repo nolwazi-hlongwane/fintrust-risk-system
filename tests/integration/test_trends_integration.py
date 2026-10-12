@@ -14,7 +14,7 @@ from decimal import Decimal
 import pytest
 
 from fintrust import query
-from tests.conftest import SQL_DIR
+from tests.conftest import SQL_DIR, signed_in
 
 pytestmark = pytest.mark.integration
 
@@ -31,7 +31,7 @@ def as_query_user(as_db_user):
 def get(resource, params=None, path=None):
     response = query.handler(
         {"httpMethod": "GET", "resource": resource, "queryStringParameters": params, "pathParameters": path,
-         "requestContext": {"requestId": "api-request-id"}},
+         "requestContext": signed_in("api-request-id")},
         Context(),
     )
     return response["statusCode"], json.loads(response["body"])

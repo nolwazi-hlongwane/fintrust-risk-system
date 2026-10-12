@@ -53,6 +53,10 @@ DEFAULTS = {
     "db_auth_mode": "iam",              # "iam" in AWS, "password" for local tests
     "max_receive_count": "3",           # failed attempts before SQS dead-letters a message
     "cors_allowed_origin": "*",         # tightened to the dashboard's address when it is deployed
+    # Sign-in sessions (Week 15 Day 2, fintrust/sessions.py)
+    "session_idle_minutes": "15",       # no request for this long ends the session
+    "session_max_hours": "8",           # a working day; matches the refresh token's lifetime
+    "session_retention_days": "90",     # the sign-in record is deleted after this (DynamoDB time-to-live)
 }
 
 

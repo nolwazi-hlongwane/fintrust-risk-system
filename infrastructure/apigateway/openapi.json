@@ -3,20 +3,30 @@
   "info": {
     "title": "__PREFIX__-api",
     "version": "1.0",
-    "description": "FinTrust Transaction Insights and Risk Monitoring API. Every route except OPTIONS requires an API key in the x-api-key header."
+    "description": "FinTrust Transaction Insights and Risk Monitoring API. Every route except OPTIONS needs the dashboard's API key in the x-api-key header (usage plan). Every route except GET /health and OPTIONS also needs a signed-in person's Amazon Cognito ID token in the Authorization header. The query Lambda then checks the person's session and role."
   },
   "x-amazon-apigateway-api-key-source": "HEADER",
   "x-amazon-apigateway-gateway-responses": {
     "DEFAULT_4XX": {
       "responseParameters": {
         "gatewayresponse.header.Access-Control-Allow-Origin": "'__CORS_ORIGIN__'",
-        "gatewayresponse.header.Access-Control-Allow-Headers": "'content-type,x-api-key'"
+        "gatewayresponse.header.Access-Control-Allow-Headers": "'authorization,content-type,x-api-key'"
       }
     },
     "DEFAULT_5XX": {
       "responseParameters": {
         "gatewayresponse.header.Access-Control-Allow-Origin": "'__CORS_ORIGIN__'",
-        "gatewayresponse.header.Access-Control-Allow-Headers": "'content-type,x-api-key'"
+        "gatewayresponse.header.Access-Control-Allow-Headers": "'authorization,content-type,x-api-key'"
+      }
+    },
+    "UNAUTHORIZED": {
+      "statusCode": 401,
+      "responseParameters": {
+        "gatewayresponse.header.Access-Control-Allow-Origin": "'__CORS_ORIGIN__'",
+        "gatewayresponse.header.Access-Control-Allow-Headers": "'authorization,content-type,x-api-key'"
+      },
+      "responseTemplates": {
+        "application/json": "{\"error\": {\"code\": \"NOT_SIGNED_IN\", \"message\": \"Sign in to use the FinTrust API.\", \"request_id\": \"$context.requestId\"}}"
       }
     }
   },
@@ -54,7 +64,122 @@
         }
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
+        "responses": {
+          "204": {
+            "description": "CORS headers"
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "arn:aws:apigateway:__REGION__:lambda:path/2015-03-31/functions/__LAMBDA_ARN__/invocations",
+          "passthroughBehavior": "when_no_match"
+        }
+      }
+    },
+    "/session": {
+      "get": {
+        "summary": "Who is signed in, their role and permissions, and whether the session is still open (also the dashboard's heartbeat)",
+        "security": [
+          {
+            "api_key": [],
+            "cognito": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The open session"
+          },
+          "401": {
+            "description": "Not signed in, or the session has ended (code SESSION_ENDED with the reason)"
+          },
+          "403": {
+            "description": "Missing or invalid API key"
+          },
+          "429": {
+            "description": "Usage plan limit reached"
+          },
+          "503": {
+            "description": "The session store is not available"
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "arn:aws:apigateway:__REGION__:lambda:path/2015-03-31/functions/__LAMBDA_ARN__/invocations",
+          "passthroughBehavior": "when_no_match"
+        }
+      },
+      "post": {
+        "summary": "Record a new sign-in, after Amazon Cognito has signed the person in. Calling it again for the same sign-in is harmless",
+        "security": [
+          {
+            "api_key": [],
+            "cognito": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session was already recorded"
+          },
+          "201": {
+            "description": "Session recorded"
+          },
+          "401": {
+            "description": "Not signed in, or this sign-in has already ended (it cannot be reopened)"
+          },
+          "403": {
+            "description": "Missing or invalid API key, or the account has no role (code NO_ROLE)"
+          },
+          "429": {
+            "description": "Usage plan limit reached"
+          },
+          "503": {
+            "description": "The session store is not available"
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "arn:aws:apigateway:__REGION__:lambda:path/2015-03-31/functions/__LAMBDA_ARN__/invocations",
+          "passthroughBehavior": "when_no_match"
+        }
+      },
+      "delete": {
+        "summary": "Sign out. The session ends and the same token is refused from then on",
+        "security": [
+          {
+            "api_key": [],
+            "cognito": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signed out"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Missing or invalid API key"
+          },
+          "429": {
+            "description": "Usage plan limit reached"
+          },
+          "503": {
+            "description": "The session store is not available"
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "arn:aws:apigateway:__REGION__:lambda:path/2015-03-31/functions/__LAMBDA_ARN__/invocations",
+          "passthroughBehavior": "when_no_match"
+        }
+      },
+      "options": {
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -73,7 +198,8 @@
         "summary": "List transactions, filtered and paginated",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -83,8 +209,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "429": {
             "description": "Usage plan limit reached"
@@ -104,7 +233,7 @@
             "name": "account_id",
             "in": "query",
             "required": false,
-            "description": "Exact account, e.g. ACC-1007",
+            "description": "Exact account, e.g. ACC-1007 (1007 is accepted as short for ACC-1007)",
             "schema": {
               "type": "string"
             }
@@ -146,6 +275,69 @@
             }
           },
           {
+            "name": "tx_type",
+            "in": "query",
+            "required": false,
+            "description": "CREDIT or DEBIT",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "description": "POS, ONLINE, ATM, EFT, MOBILE or BRANCH",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country_code",
+            "in": "query",
+            "required": false,
+            "description": "Two-letter country, e.g. ZA or GB",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_amount",
+            "in": "query",
+            "required": false,
+            "description": "Smallest amount in rand, e.g. 50000",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_amount",
+            "in": "query",
+            "required": false,
+            "description": "Largest amount in rand",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "merchant",
+            "in": "query",
+            "required": false,
+            "description": "Merchant name contains this text (not case-sensitive), at most 60 characters",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "newest (default), oldest, amount_desc, amount_asc, account_asc, account_desc, merchant_asc, merchant_desc, score_desc or score_asc",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -166,7 +358,7 @@
         ]
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -185,7 +377,8 @@
         "summary": "One transaction's processing steps and score breakdown",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -195,8 +388,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "429": {
             "description": "Usage plan limit reached"
@@ -223,7 +419,7 @@
         ]
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -252,7 +448,8 @@
         "summary": "Risk summary for the compliance team",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -262,8 +459,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "429": {
             "description": "Usage plan limit reached"
@@ -300,7 +500,7 @@
         ]
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -319,7 +519,8 @@
         "summary": "The series behind the dashboard charts: activity, score distribution, alert flow and account ranking",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -329,8 +530,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "429": {
             "description": "Usage plan limit reached"
@@ -367,7 +571,7 @@
         ]
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -386,7 +590,8 @@
         "summary": "List alerts for high-risk transactions",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -396,8 +601,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "429": {
             "description": "Usage plan limit reached"
@@ -423,6 +631,42 @@
             }
           },
           {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "description": "Exact account, e.g. ACC-1007",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Raised on or after this date, YYYY-MM-DD",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Raised on or before this date, YYYY-MM-DD",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "newest (default), oldest, amount_desc, amount_asc, score_desc, account_asc or account_desc",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -443,7 +687,7 @@
         ]
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -462,7 +706,8 @@
         "summary": "List accounts ranked by risk (from the v_risk_dashboard view)",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -472,8 +717,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "429": {
             "description": "Usage plan limit reached"
@@ -499,6 +747,33 @@
             }
           },
           {
+            "name": "account_type",
+            "in": "query",
+            "required": false,
+            "description": "CHEQUE, SAVINGS, CREDIT or BUSINESS",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Account id contains this text, e.g. 100",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "risk_desc (default), risk_asc, account_asc, account_desc, recent, transactions_desc, high_risk_desc or open_alerts_desc",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -519,7 +794,7 @@
         ]
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -538,7 +813,8 @@
         "summary": "One account's running balance (the sql/monthly_summary.sql window function)",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -548,8 +824,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "404": {
             "description": "No such account"
@@ -597,7 +876,7 @@
         ]
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -626,7 +905,8 @@
         "summary": "Submit a CSV file for processing. Answers 202 at once; processing continues in the background",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -636,8 +916,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "413": {
             "description": "File larger than 5 MB"
@@ -682,7 +965,7 @@
         }
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -701,7 +984,8 @@
         "summary": "Flag an account for review (calls the flag_account database function)",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -711,8 +995,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "404": {
             "description": "Account does not exist"
@@ -760,7 +1047,7 @@
         }
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -779,7 +1066,8 @@
         "summary": "Mark an alert as resolved",
         "security": [
           {
-            "api_key": []
+            "api_key": [],
+            "cognito": []
           }
         ],
         "responses": {
@@ -789,8 +1077,11 @@
           "400": {
             "description": "Invalid request"
           },
+          "401": {
+            "description": "Not signed in, or the session has ended (code NOT_SIGNED_IN or SESSION_ENDED)"
+          },
           "403": {
-            "description": "Missing or invalid API key"
+            "description": "Missing or invalid API key, or the person's role does not allow this (code FORBIDDEN or NO_ROLE)"
           },
           "404": {
             "description": "Alert does not exist"
@@ -842,7 +1133,7 @@
         }
       },
       "options": {
-        "summary": "Browser preflight check (no API key; returns CORS headers only)",
+        "summary": "Browser preflight check (no API key, no sign-in; returns CORS headers only)",
         "responses": {
           "204": {
             "description": "CORS headers"
@@ -863,6 +1154,18 @@
         "type": "apiKey",
         "name": "x-api-key",
         "in": "header"
+      },
+      "cognito": {
+        "type": "apiKey",
+        "name": "Authorization",
+        "in": "header",
+        "x-amazon-apigateway-authtype": "cognito_user_pools",
+        "x-amazon-apigateway-authorizer": {
+          "type": "cognito_user_pools",
+          "providerARNs": [
+            "__USER_POOL_ARN__"
+          ]
+        }
       }
     }
   }

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fintrust import db, query
+from tests.conftest import signed_in
 
 
 class Context:
@@ -20,7 +21,7 @@ class Context:
 def call(resource, params=None, path=None):
     response = query.handler(
         {"httpMethod": "GET", "resource": resource, "queryStringParameters": params, "pathParameters": path,
-         "requestContext": {"requestId": "api-request-id"}},
+         "requestContext": signed_in("api-request-id")},
         Context(),
     )
     return response["statusCode"], json.loads(response["body"])
