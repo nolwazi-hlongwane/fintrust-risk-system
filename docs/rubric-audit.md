@@ -14,7 +14,7 @@ Each rubric descriptor at the "Exceeds Expectations" level is broken into its pa
 | Every Lambda role is least-privilege; no wildcard actions | Met, and enforced by 97 tests | `docs/security-plan.md` (role matrix); `infrastructure/iam/policies/`; `tests/unit/test_iam_policies.py`; `w13d1-iam-roles.png`, `w13d1-permission-boundary.png` |
 | RDS has no public endpoint | Met | `infrastructure/rds/deploy_rds.sh`; `w13d2-rds-private.png`, `w13d2-security-groups.png` |
 | DLQ behaviour has been tested | Automated tests, and on the real account by the end-to-end test | `tests/integration/test_pipeline.py`; `scripts/e2e_test.py` stage 8; `w14d3-dead-letter-tests.png`, `w14d5-e2e-output.txt`, `w14d5-dlq-journey.png` |
-| Billing evidence confirms Free Tier throughout | Evidence captured in this phase | `w14d5-billing-summary.png`, `w14d5-billing-credits.png`, `w13d1-billing-alarm.png`; see "Free Tier and cost" below |
+| Billing evidence confirms Free Tier throughout | Met | `w14d5-billing-summary.png`, `w14d5-billing-credits.png`, `w13d1-billing-alarm.png`; see "Free Tier and cost" below |
 | NAT Gateway excluded | Met | `infrastructure/network/deploy_network.sh`; `docs/architecture.md` |
 | Survives a simulated AZ failure | Analysed component by component; the dead-letter recovery, which is what protects data during a database outage, is tested live | `docs/well-architected-review.md` section 3 |
 | Every service choice justified (resilience, security, performance, cost) | Met | `docs/architecture.md`, "Why each service was chosen" |
@@ -51,7 +51,7 @@ Each rubric descriptor at the "Exceeds Expectations" level is broken into its pa
 | moto `@mock_aws` fixtures via `conftest.py` | Met | `tests/conftest.py` |
 | GitHub Actions CI green on every push | Met | `.github/workflows/ci.yml`; `w14d3-ci-feature-branch.png`, `w14d3-ci-develop.png` |
 | Integration tests scoped to the develop branch only | Met, and checked by a test | `.github/workflows/ci.yml` |
-| The end-to-end test script has been run successfully against the real deployed system | Run in this phase | `scripts/e2e_test.py`; `docs/evidence/w14d5-e2e-output.txt`, `w14d5-e2e-passed.png` |
+| The end-to-end test script has been run successfully against the real deployed system | Met: 30 of 30 checks in 5 minutes 29 seconds | `scripts/e2e_test.py`; `docs/evidence/w14d5-e2e-output.txt`, `w14d5-e2e-passed.png` |
 
 ## C5. Data Governance and Compliance (10 points)
 
@@ -143,13 +143,11 @@ Built in addition, without replacing anything required: the web dashboard on Clo
 | RDS db.t3.micro | 750 hours a month on the legacy plan | On this account's credit plan it draws credits while running, so it is stopped outside working sessions and automatically at 20:00 |
 | KMS customer-managed key | Not free | About 1 USD a month from credits |
 
-Evidence: `w14d5-billing-summary.png` (charges for the month), `w14d5-billing-credits.png` (credits applied and remaining), `w13d1-billing-alarm.png` (the R200 alarm).
+Evidence: `w14d5-billing-summary.png` (charges for the month), `w14d5-billing-credits.png` (credits applied and remaining), `w13d1-billing-alarm.png` (the 11 USD, about R200, alarm).
 
-## Still to do by hand
+## Submission steps
 
-These cannot be done by code in the repository:
-
-1. Run `python scripts/e2e_test.py | tee docs/evidence/w14d5-e2e-output.txt` and capture the Week 14 Day 5 screenshots listed in `docs/build-log.md`.
-2. Capture the two billing screenshots.
-3. Merge `develop` into `main` and make the repository public.
-4. Submit the repository link (Portfolio Check-In #14).
+1. `scripts/e2e_test.py` run on the real account: 30 of 30 checks passed (`docs/evidence/w14d5-e2e-output.txt`).
+2. Week 14 Day 5 screenshots and the two billing screenshots captured in `docs/evidence/`.
+3. `develop` merged into `main`; repository shared with the facilitator.
+4. Repository link submitted (Portfolio Check-In #14).
