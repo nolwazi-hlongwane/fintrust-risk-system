@@ -4,12 +4,14 @@
 
 The database must be running (./scripts/rds_start.sh).
 
-It checks three things:
+It checks four things:
     * hosting: the bucket is private, only CloudFront can read it, and the site
       is served over HTTPS with security headers
     * browser access (CORS): the API answers the dashboard's address and no other
     * the two things the dashboard needs that are new: GET /accounts, and a
       rule breakdown for transactions loaded as opening data
+    * the chart routes (Week 15 Day 1): GET /insights/trends and
+      GET /accounts/{account_id}/balance, reconciled with GET /insights
 
 It changes nothing.
 """
@@ -25,7 +27,7 @@ from botocore.exceptions import ClientError
 from verify_write_api_alerts import PREFIX, REGION, TLS, account_id, api_settings, check, parameter, results, session
 
 BUCKET = f"{PREFIX}-dashboard-{account_id}"
-FILES = ("index.html", "styles.css", "app.js", "config.js", "favicon.svg")
+FILES = ("index.html", "styles.css", "charts.js", "app.js", "config.js", "favicon.svg")
 OTHER_SITE = "https://evil.example"
 
 s3 = session.client("s3")
@@ -157,6 +159,57 @@ def verify_new_routes(api_url, key):
           ", ".join(f"{rule['rule']} +{rule['points']}" for rule in rules))
 
 
+def verify_chart_routes(api_url, key):
+    """Week 15 Day 1: the two routes behind the Overview charts, reconciled with GET /insights."""
+    from decimal import Decimal
+
+    print("\nThe chart data (Week 15 Day 1)")
+
+    def get(path):
+        status, _, body = fetch(api_url + path, headers={"x-api-key": key})
+        return status, (json.loads(body) if status in (200, 404) else {})
+
+    status, insights = get("/insights")
+    status_trends, trends = get("/insights/trends")
+    check("GET /insights/trends answers", status_trends == 200, f"HTTP {status_trends}")
+    if status != 200 or status_trends != 200:
+        return
+    activity = trends["activity"]
+    check("the activity chart adds up to the Overview's transaction count",
+          sum(row["transactions"] for row in activity) == insights["totals"]["transactions"],
+          f"{sum(row['transactions'] for row in activity)} vs {insights['totals']['transactions']}")
+    check("the activity chart's Low, Medium and High add up to the Risk levels figures",
+          all(sum(row[level.lower()] for row in activity) == insights["by_risk_level"][level]
+              for level in ("LOW", "MEDIUM", "HIGH")))
+    check("the activity chart's value adds up to the Total value figure",
+          sum(Decimal(str(row["total_value"])) for row in activity) == Decimal(insights["totals"]["total_value"]))
+    buckets = trends["score_distribution"]["buckets"]
+    check("every transaction is in exactly one bar of the score chart",
+          sum(b["low"] + b["medium"] + b["high"] for b in buckets) == insights["totals"]["transactions"])
+    flow = trends["alert_flow"]
+    check("the alert chart's bars add up to its totals",
+          sum(p["raised"] for p in flow["periods"]) == flow["raised"]
+          and sum(p["resolved"] for p in flow["periods"]) == flow["resolved"], f"{flow['raised']} raised")
+    ranking = trends["account_ranking"]["items"]
+    check("the ranking is in rank order with percentiles between 0 and 1",
+          bool(ranking) and [r["fraud_rank"] for r in ranking] == sorted(r["fraud_rank"] for r in ranking)
+          and all(0 <= Decimal(r["fraud_percentile"]) <= 1 for r in ranking))
+    bursts = [r["account_id"] for r in ranking if r["burst_detected"]]
+    check("the 30-day burst rule marks at least one account (ACC-1007 in the seed data)", "ACC-1007" in bursts,
+          ", ".join(bursts))
+
+    status, balance = get("/accounts/ACC-1007/balance")
+    summary = balance.get("summary") or {}
+    check("GET /accounts/{account_id}/balance answers for ACC-1007", status == 200 and bool(balance.get("points")),
+          f"HTTP {status}")
+    if summary:
+        check("its balance adds up: opening + money in - money out = closing",
+              Decimal(summary["opening_balance"]) + Decimal(summary["credits"]) - Decimal(summary["debits"])
+              == Decimal(summary["closing_balance"]), summary["closing_balance"])
+    status, _ = get("/accounts/ACC-9999/balance")
+    check("an account that does not exist is a 404", status == 404, f"HTTP {status}")
+
+
 def main():
     print(f"Verifying the dashboard in account {account_id}, region {REGION}")
     try:
@@ -175,6 +228,7 @@ def main():
         else:
             verify_cors(dashboard_url, api_url, key)
             verify_new_routes(api_url, key)
+            verify_chart_routes(api_url, key)
     except ClientError as error:
         print(f"\nStopped: AWS returned an error: {error}", file=sys.stderr)
         return 1
