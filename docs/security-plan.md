@@ -30,19 +30,21 @@ One row per Lambda function. "Base" permissions are deployed now; the rest are t
 | | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` | Transactions FIFO queue | Deployed W13 D3 |
 | | `kms:Decrypt` | The project key | Deployed W13 D3 |
 | **alert** (`fintrust-capstone-alert-role`) | Logs, X-Ray, SSM (as ingest) | Own log group; `/fintrust/dev/*` | Deployed W13 D1 |
-| | `dynamodb:GetRecords`, `GetShardIterator`, `DescribeStream`, `ListStreams` | Events table stream | W14 D1 |
-| | `dynamodb:PutItem` | Events table | W14 D1 |
-| | `ses:SendEmail` | The verified sender identity only | W14 D1 |
-| | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | W14 D1 |
+| | `dynamodb:GetRecords`, `GetShardIterator`, `DescribeStream` | Events table stream | Deployed W14 D1 |
+| | `dynamodb:ListStreams` | `*` (AWS does not support a narrower resource for this action) | Deployed W14 D1 |
+| | `dynamodb:GetItem`, `dynamodb:PutItem` | Events table (alert markers and journey steps) | Deployed W14 D1 |
+| | `ses:SendEmail` | The verified sender and recipient identities only | Deployed W14 D1 |
+| | `sqs:SendMessage` | Alert dead-letter queue only | Deployed W14 D1 |
+| | `kms:Decrypt`, `kms:GenerateDataKey` | The project key | Deployed W14 D1 |
 | **query** (`fintrust-capstone-query-role`) | Logs, X-Ray, network interfaces (as score) | Own log group | Deployed W13 D1 |
 | | `rds-db:connect` | Database user `fintrust_query` only | Deployed W13 D2 |
 | | `dynamodb:Query`, `dynamodb:GetItem` | Events table and its index | Deployed W13 D2 |
-| | `s3:PutObject` | Raw bucket, `uploads/` prefix only | W14 D1 |
-| | `kms:GenerateDataKey` | The project key | W14 D1 |
+| | `s3:PutObject` | Raw bucket, `uploads/` prefix only | Deployed W14 D1 |
+| | `kms:GenerateDataKey` | The project key | Deployed W14 D1 |
 | **report** (`fintrust-capstone-report-role`) | Logs, X-Ray, network interfaces (as score) | Own log group | Deployed W13 D1 |
 | | `rds-db:connect` | Database user `fintrust_report` only | Deployed W13 D2 |
-| | `s3:PutObject` | Reports bucket objects | W14 D4 |
-| | `kms:GenerateDataKey` | The project key | W14 D4 |
+| | `s3:PutObject` | Reports bucket, `monthly/` prefix only | Deployed W14 D4 |
+| | `kms:GenerateDataKey` | The project key | Deployed W14 D4 |
 
 What no role can do: delete anything, read another function's logs, change IAM, create or modify infrastructure, or reach any resource outside the `fintrust-capstone-` prefix.
 
@@ -62,11 +64,13 @@ What no role can do: delete anything, read another function's logs, change IAM, 
 | Database user | Used by | Rights |
 |---|---|---|
 | `fintrust_score` | score Lambda | Insert into `transactions`, `risk_events`, `alerts`; read `accounts` and `transactions` |
-| `fintrust_query` | query Lambda | Read all tables and views; update `alerts`; execute `flag_account` |
-| `fintrust_report` | report Lambda | Read only |
+| `fintrust_query` | query Lambda | Read all tables and both views; update the four resolution columns of `alerts`; execute `flag_account` |
+| `fintrust_report` | report Lambda | Read only, and not the `customers` table: `accounts`, `transactions`, `risk_events`, `alerts` and both views |
 | master user | Nolwazi, through the tunnel only | Schema changes. Never used by a Lambda |
 
-So even if the report Lambda's code were compromised, both IAM and the database would refuse a write.
+So even if the report Lambda's code were compromised, both IAM and the database would refuse a write, and it could not read a customer's name or contact details.
+
+The views `v_risk_dashboard` and `v_open_alerts` contain no customer contact details, so access to them can be granted without access to `customers`.
 
 ## Network security
 
@@ -75,7 +79,7 @@ So even if the report Lambda's code were compromised, both IAM and the database 
 | VPC | Two private subnets in two Availability Zones. No internet gateway route, no NAT Gateway |
 | RDS | `PubliclyAccessible = false`, in the private subnets |
 | RDS security group | Inbound PostgreSQL 5432 only from the Lambda security group and the tunnel instance's security group |
-| Lambda security group | No inbound rules. Outbound 5432 to the RDS security group, and HTTPS to the S3 and DynamoDB gateway endpoints |
+| Lambda security group | No inbound rules. Outbound 5432 to the RDS security group, and HTTPS to the S3 and DynamoDB gateway endpoints (by AWS prefix list). Nothing else |
 | Gateway endpoints | S3 and DynamoDB traffic stays on the AWS network |
 | API Gateway | The only public entry point; HTTPS only; API key required; throttled |
 
@@ -86,10 +90,11 @@ So even if the report Lambda's code were compromised, both IAM and the database 
 | S3 buckets | SSE-KMS with the customer-managed key; bucket key enabled to reduce KMS calls | Bucket policy denies requests without TLS |
 | DynamoDB | Encrypted by default with an AWS owned key (no customer details are stored in this table) | HTTPS |
 | SQS queues | KMS customer-managed key | HTTPS |
+| SNS alarm topic | KMS customer-managed key | HTTPS |
 | RDS | Storage encryption enabled | TLS required for every connection (`sslmode=require`; IAM authentication only works over TLS) |
 | SSM parameters | Standard parameters hold no secrets | HTTPS |
 
-The customer-managed key (`alias/fintrust-capstone`) has automatic yearly rotation enabled. Its key policy is the AWS default, which hands control to IAM in this account; which role may use the key, and how, is then written in that role's own policy next to its other permissions. Only `kms:Decrypt` and `kms:GenerateDataKey` are ever granted, and a test fails the build if any role is given a key-management action.
+The customer-managed key (`alias/fintrust-capstone`) has automatic yearly rotation enabled. Its key policy (`infrastructure/kms/key-policy.json`) has two statements. The first is the AWS default, which hands control to IAM in this account; which role may use the key, and how, is then written in that role's own policy next to its other permissions. The second lets the CloudWatch service use the key, so that an alarm can publish to the encrypted alarm topic; a service is not an IAM role, so the key policy is the only place this can be granted. Only `kms:Decrypt` and `kms:GenerateDataKey` are ever granted, and a test fails the build if any role is given a key-management action.
 
 The bucket policy uses `"Action": "s3:*"` in a **Deny** statement (refuse anything not sent over TLS). A wildcard in a Deny removes access; it cannot grant any. The "no wildcard actions" rule applies to the Allow statements in the Lambda roles.
 
@@ -103,11 +108,24 @@ The bucket policy uses `"Action": "s3:*"` in a **Deny** statement (refuse anythi
 | Nolwazi | AWS | IAM user with MFA; root user is used for billing settings only |
 | Nolwazi | PostgreSQL | Master user through an SSH tunnel via EC2 Instance Connect Endpoint; no public IP, no open inbound port |
 
+## The web dashboard
+
+| Control | How |
+|---|---|
+| Files are not public in S3 | All public access blocked; CloudFront reads the bucket through origin access control; the bucket policy names the one distribution |
+| HTTPS only | CloudFront redirects http to https; HSTS header |
+| The API key is never stored | Typed in by the user; kept in the browser tab's session only |
+| Script injection | No HTML is built from data; a strict Content-Security-Policy allows only the page's own script and only this API |
+| Other websites cannot use the API through a visitor's browser | CORS allows the dashboard's address only, on Lambda responses and on API Gateway's own error responses |
+
+Details are in [dashboard.md](dashboard.md).
+
 ## Logging, monitoring and audit
 
 - Structured JSON logs from every Lambda, 30-day retention.
 - Logs never contain customer names, contact details or full account numbers.
-- CloudWatch alarms on error rate, high-risk transaction count and DLQ depth.
+- Seven CloudWatch alarms: scoring error rate, high-risk transaction count, the three dead-letter queues, Lambda errors and API server errors. Each emails an encrypted SNS topic. See [monitoring.md](monitoring.md).
+- Custom metrics are published as log lines, so no Lambda role needs `cloudwatch:PutMetricData`.
 - **CloudWatch** answers "is the system healthy?" (operations). **CloudTrail** answers "who changed what in the account?" (audit). CloudTrail's 90-day event history is on by default and is the audit record for IAM and infrastructure changes.
 
 ## Secrets handling in the repository

@@ -210,3 +210,12 @@ class TestErrors:
 
     def test_resource_is_created_at_module_level(self):
         assert dynamo._dynamodb.meta.service_name == "dynamodb"
+
+
+def test_events_written_in_the_same_millisecond_are_all_kept(events_table):
+    """Regression: a fast machine wrote two SCORE_FAILED events in one millisecond
+    and the second replaced the first, because the sort key only had milliseconds."""
+    for attempt in range(1, 51):
+        dynamo.put_event("ACC-1001", "2026-09-15T13:10:00Z", "TXN-20260915-000900", "SCORE_FAILED", f"Attempt {attempt}")
+    events = dynamo.get_journey("TXN-20260915-000900")["events"]
+    assert [event["detail"] for event in events] == [f"Attempt {attempt}" for attempt in range(1, 51)]

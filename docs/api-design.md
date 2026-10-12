@@ -1,7 +1,7 @@
 # API Design
 
-**Brief slot:** Week 13 Day 1: Design Kickoff (specification). Read routes are built in Week 13 Day 5, write routes in Week 14 Day 1.
-**Status:** draft specification. Response examples are replaced with real output once deployed.
+**Brief slot:** Week 13 Day 1: Design Kickoff (specification). Read routes built in Week 13 Day 5; `/alerts` and the write routes in Week 14 Day 1.
+**Status:** all nine routes are deployed (read routes in Week 13 Day 5; `/alerts`, `/upload`, `/flag` and `/resolve` in Week 14 Day 1; `/accounts` in Week 14 Day 4). The machine-readable definition is `infrastructure/apigateway/openapi.json` (OpenAPI 3), which is what API Gateway is built from.
 
 ## Overview
 
@@ -31,6 +31,7 @@ The key is never stored in the repository or in the dashboard's code. The dashbo
 | GET | `/transactions/{transaction_id}/journey` | Timeline and score breakdown for one transaction | 200 |
 | GET | `/insights` | Risk summary for the compliance team | 200 |
 | GET | `/alerts` | List alerts | 200 |
+| GET | `/accounts` | List accounts ranked by risk | 200 |
 | POST | `/upload` | Submit a CSV file for processing | 202 |
 | POST | `/flag` | Flag an account for review | 201 |
 | POST | `/resolve` | Mark an alert as resolved | 200 |
@@ -49,9 +50,10 @@ Returns `503` with `"database": "unavailable"` if RDS cannot be reached (for exa
 
 | Query parameter | Required | Rule |
 |---|---|---|
-| `account_id` | no | Exact match |
+| `account_id` | no | Exact match, e.g. `ACC-1007` |
+| `transaction_id` | no | Exact match |
 | `risk_level` | no | `LOW`, `MEDIUM` or `HIGH` |
-| `from`, `to` | no | Dates, `YYYY-MM-DD`, inclusive |
+| `from`, `to` | no | Dates, `YYYY-MM-DD`, inclusive, as South African calendar days |
 | `limit` | no | 1 to 100, default 25 |
 | `offset` | no | 0 or more, default 0 |
 
@@ -79,12 +81,14 @@ Amounts are returned as text so no precision is lost.
 
 ### GET /transactions/{transaction_id}/journey
 
-Read from the DynamoDB event store.
+Read from the DynamoDB event store (`"source": "event_store"`). A transaction that was loaded as opening data never passed through the pipeline and has no events; for those the score and the rules that fired are read from the ledger in RDS instead (`"source": "ledger"`, `"events": []`). `404` only if the transaction is in neither.
 
 ```json
 {
   "transaction_id": "TXN-20260915-000123",
   "account_id": "ACC-1007",
+  "source": "event_store",
+  "status": "SCORED",
   "score": {
     "risk_score": 70,
     "risk_level": "HIGH",
@@ -94,14 +98,16 @@ Read from the DynamoDB event store.
     ]
   },
   "events": [
-    { "stage": "RECEIVED", "at": "2026-09-15T07:42:15Z", "detail": "uploads/2026-09-15/batch.csv row 14" },
-    { "stage": "VALIDATED", "at": "2026-09-15T07:42:15Z" },
-    { "stage": "QUEUED", "at": "2026-09-15T07:42:16Z" },
-    { "stage": "SCORED", "at": "2026-09-15T07:42:18Z" },
-    { "stage": "ALERT_SENT", "at": "2026-09-15T07:42:20Z" }
+    { "stage": "RECEIVED", "at": "2026-09-15T07:42:15.120417Z", "detail": "uploads/2026-09-15/batch.csv row 14" },
+    { "stage": "VALIDATED", "at": "2026-09-15T07:42:15.120417Z" },
+    { "stage": "QUEUED", "at": "2026-09-15T07:42:16.120417Z" },
+    { "stage": "SCORED", "at": "2026-09-15T07:42:18.120417Z" },
+    { "stage": "ALERT_SENT", "at": "2026-09-15T07:42:20.120417Z" }
   ]
 }
 ```
+
+`status` is one of `RECEIVED`, `QUEUED`, `RETRYING` (scoring has failed once or twice and SQS will try again), `DEAD_LETTERED` (three failures; the message is waiting in the dead-letter queue), `SCORED` or `ALERTED`. A transaction that failed scoring has `"score": null` and one `SCORE_FAILED` event per attempt, each with a plain-language reason.
 
 `404` if the transaction id is unknown.
 
@@ -129,7 +135,60 @@ Optional `from` and `to` dates.
 | `status` | no | `OPEN` or `RESOLVED` |
 | `limit`, `offset` | no | As for `/transactions` |
 
-Returns `items` and `pagination` in the same shape as `/transactions`.
+Returns `items` and `pagination` in the same shape as `/transactions`, newest alert first. Each item joins the alert to its transaction:
+
+```json
+{
+  "alert_id": 57,
+  "status": "OPEN",
+  "created_at": "2026-10-07 09:12:44.120000+00:00",
+  "resolved_at": null,
+  "resolved_by": null,
+  "resolution_note": null,
+  "transaction_id": "TXN-20261002-900007",
+  "account_id": "ACC-1007",
+  "tx_date": "2026-10-02 09:48:09+00:00",
+  "amount": "88750.00",
+  "currency": "ZAR",
+  "country_code": "AE",
+  "risk_score": 70,
+  "risk_level": "HIGH"
+}
+```
+
+### GET /accounts
+
+Reads the `v_risk_dashboard` view, highest total risk points first. The view holds no customer names or contact details.
+
+| Query parameter | Required | Rule |
+|---|---|---|
+| `status` | no | `ACTIVE`, `FLAGGED` or `CLOSED` |
+| `limit`, `offset` | no | As for `/transactions` |
+
+```json
+{
+  "items": [
+    {
+      "account_id": "ACC-1007",
+      "account_type": "BUSINESS",
+      "account_status": "FLAGGED",
+      "transaction_count": 31,
+      "total_credits": "955800.00",
+      "total_debits": "567380.72",
+      "high_risk_count": 5,
+      "medium_risk_count": 4,
+      "highest_risk_score": 70,
+      "total_risk_points": 550,
+      "last_transaction_at": "2026-09-30 11:46:11+00:00",
+      "last_high_risk_at": "2026-09-15 13:15:00+00:00",
+      "open_alerts": 1,
+      "resolved_alerts": 4,
+      "manual_flags": 1
+    }
+  ],
+  "pagination": { "limit": 25, "offset": 0, "total": 12, "has_more": false }
+}
+```
 
 ### POST /upload
 
@@ -150,7 +209,9 @@ Accepts the file and returns immediately. Processing continues in the background
 }
 ```
 
-Status `202 Accepted`. `400` for an empty body or a missing header row, `413` if larger than 5 MB.
+Status `202 Accepted`. `400` for an empty body, a header row with missing columns, a file that is not UTF-8 text or an unsafe `filename`; `413` if larger than 5 MB; `503` if the file could not be stored.
+
+The object key is always built by the API (`uploads/<date>/<8 characters of the upload id>-<filename>`); it is never taken from the caller. Only the header is checked here. Each row is validated by the ingest Lambda, and the progress of any transaction can be followed with `GET /transactions/{transaction_id}/journey`.
 
 ### POST /flag
 
@@ -164,7 +225,7 @@ Calls the `flag_account` database function, which inserts a `risk_events` row an
 { "risk_event_id": 381, "account_id": "ACC-1007", "account_status": "FLAGGED" }
 ```
 
-Status `201`. `400` if a field is missing or `reason` is longer than 500 characters, `404` if the account does not exist.
+Status `201`. `400` if a field is missing or `reason` is longer than 500 characters, `404` if the account does not exist, `409` if the account is closed.
 
 ### POST /resolve
 
@@ -173,10 +234,10 @@ Status `201`. `400` if a field is missing or `reason` is longer than 500 charact
 ```
 
 ```json
-{ "alert_id": 57, "status": "RESOLVED", "resolved_at": "2026-10-06T11:05:00Z" }
+{ "alert_id": 57, "status": "RESOLVED", "resolved_at": "2026-10-07 11:05:00.482113+00:00", "resolved_by": "n.hlongwane" }
 ```
 
-Status `200`. `404` if the alert does not exist, `409` if it is already resolved.
+Status `200`. `400` if `alert_id` is not a positive whole number or `resolved_by` is not 2 to 60 letters, digits, dots, dashes or underscores; `404` if the alert does not exist; `409` if it is already resolved. `resolution_note` is optional (at most 500 characters).
 
 ## Errors
 
@@ -204,3 +265,15 @@ Every error produced by the Lambda has the same shape:
 ## Cross-origin access (CORS)
 
 The API allows browser calls only from the dashboard's CloudFront address, with headers `content-type` and `x-api-key`.
+
+How it works:
+
+1. The setting `cors_allowed_origin` in SSM holds the dashboard's address. `deploy_frontend.sh` writes it.
+2. A browser sends the page's address in the `Origin` header. If it is on the list, the Lambda returns it in `Access-Control-Allow-Origin`, and the browser lets the page read the response.
+3. For any other origin the Lambda returns the dashboard's address, which does not match the caller's, so that browser refuses to hand over the response.
+4. Errors produced by API Gateway itself (a missing key, a throttled request) never reach the Lambda, so the same address is set on the gateway's default 4xx and 5xx responses when the API is deployed.
+5. `OPTIONS` preflight requests need no API key (a browser cannot attach one) and return only the CORS headers.
+
+Every response also carries `Vary: Origin`, so a cache cannot reuse one site's answer for another.
+
+CORS protects users' browsers from other websites. It is not authentication: `curl` ignores it, which is why every route still requires the API key.

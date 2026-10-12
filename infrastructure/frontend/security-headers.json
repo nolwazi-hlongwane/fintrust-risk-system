@@ -1,0 +1,27 @@
+{
+  "Name": "__PREFIX__-security-headers",
+  "Comment": "Security headers sent with every FinTrust dashboard file",
+  "SecurityHeadersConfig": {
+    "StrictTransportSecurity": {
+      "Override": true,
+      "AccessControlMaxAgeSec": 31536000,
+      "IncludeSubdomains": false,
+      "Preload": false
+    },
+    "ContentTypeOptions": {
+      "Override": true
+    },
+    "FrameOptions": {
+      "Override": true,
+      "FrameOption": "DENY"
+    },
+    "ReferrerPolicy": {
+      "Override": true,
+      "ReferrerPolicy": "no-referrer"
+    },
+    "ContentSecurityPolicy": {
+      "Override": true,
+      "ContentSecurityPolicy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src __API_ORIGIN__; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    }
+  }
+}

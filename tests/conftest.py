@@ -25,6 +25,13 @@ REGION = "eu-north-1"
 SSM_PREFIX = "/fintrust/test/"
 
 
+def pytest_collection_modifyitems(items):
+    """Mark everything under tests/integration, so `pytest -m "not integration"` skips it."""
+    for item in items:
+        if "/tests/integration/" in str(item.fspath).replace("\\", "/"):
+            item.add_marker(pytest.mark.integration)
+
+
 @pytest.fixture(autouse=True)
 def clean_config(monkeypatch):
     """Start every test with no FINTRUST_ settings and an empty SSM cache."""
@@ -183,6 +190,29 @@ def pipeline(events_table, monkeypatch):
 
 
 # ----------------------------------------------------------------------------
+# SES (moto)
+# ----------------------------------------------------------------------------
+ALERT_SENDER = "compliance-alerts@example.com"
+ALERT_RECIPIENT = "compliance-team@example.com"
+
+
+@pytest.fixture
+def mail(events_table, monkeypatch):
+    """Fake SES with a verified sender, and config pointing at it.
+
+    Returns the list of messages sent so far, so a test can assert on
+    len(mail), mail[0].subject and mail[0].body.
+    """
+    from moto.core import DEFAULT_ACCOUNT_ID
+    from moto.ses import ses_backends
+
+    monkeypatch.setenv("FINTRUST_ALERT_SENDER", ALERT_SENDER)
+    monkeypatch.setenv("FINTRUST_ALERT_RECIPIENT", ALERT_RECIPIENT)
+    boto3.client("ses", region_name=REGION).verify_email_identity(EmailAddress=ALERT_SENDER)
+    return ses_backends[DEFAULT_ACCOUNT_ID][REGION].sent_messages
+
+
+# ----------------------------------------------------------------------------
 # PostgreSQL (integration tests only)
 #
 # Integration tests need a real PostgreSQL, because moto cannot fake a database
@@ -228,7 +258,7 @@ def postgres_database():
     database = _admin_connect(TEST_DB_NAME)
     database.autocommit = True
     with database.cursor() as cursor:
-        for name in ("schema.sql", "db_users.sql", "seed.sql"):
+        for name in ("schema.sql", "functions.sql", "views.sql", "db_users.sql", "seed.sql"):
             cursor.execute((SQL_DIR / name).read_text())
         for user in ("fintrust_score", "fintrust_query", "fintrust_report"):
             cursor.execute(f"ALTER ROLE {user} PASSWORD %s", (TEST_USER_PASSWORD,))

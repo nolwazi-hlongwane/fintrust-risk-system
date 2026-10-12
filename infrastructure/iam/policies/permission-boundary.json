@@ -28,7 +28,9 @@
     {
       "Sid": "ConfigFromParameterStore",
       "Effect": "Allow",
-      "Action": ["ssm:GetParametersByPath"],
+      "Action": [
+        "ssm:GetParametersByPath"
+      ],
       "Resource": [
         "arn:aws:ssm:__REGION__:__ACCOUNT_ID__:parameter/fintrust",
         "arn:aws:ssm:__REGION__:__ACCOUNT_ID__:parameter/fintrust/*"
@@ -37,7 +39,11 @@
     {
       "Sid": "ProjectBucketsOnly",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:ListBucket"],
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
       "Resource": [
         "arn:aws:s3:::__PREFIX__-*",
         "arn:aws:s3:::__PREFIX__-*/*"
@@ -64,8 +70,7 @@
         "dynamodb:Query",
         "dynamodb:GetRecords",
         "dynamodb:GetShardIterator",
-        "dynamodb:DescribeStream",
-        "dynamodb:ListStreams"
+        "dynamodb:DescribeStream"
       ],
       "Resource": [
         "arn:aws:dynamodb:__REGION__:__ACCOUNT_ID__:table/__PREFIX__-*",
@@ -76,20 +81,35 @@
     {
       "Sid": "EncryptionKeyUse",
       "Effect": "Allow",
-      "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
+      "Action": [
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
       "Resource": "arn:aws:kms:__REGION__:__ACCOUNT_ID__:key/*"
     },
     {
       "Sid": "DatabaseLoginWithIamToken",
       "Effect": "Allow",
-      "Action": ["rds-db:connect"],
+      "Action": [
+        "rds-db:connect"
+      ],
       "Resource": "arn:aws:rds-db:__REGION__:__ACCOUNT_ID__:dbuser:*/fintrust_*"
     },
     {
       "Sid": "AlertEmail",
       "Effect": "Allow",
-      "Action": ["ses:SendEmail"],
+      "Action": [
+        "ses:SendEmail"
+      ],
       "Resource": "arn:aws:ses:__REGION__:__ACCOUNT_ID__:identity/*"
+    },
+    {
+      "Sid": "ListTableStreams",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:ListStreams"
+      ],
+      "Resource": "*"
     }
   ]
 }

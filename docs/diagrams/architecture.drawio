@@ -1,0 +1,178 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Architecture" id="architecture">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" page="1" pageWidth="1920" pageHeight="950">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="FinTrust Transaction Insights and Risk Monitoring System: architecture" style="text;html=1;align=left;fontSize=20;fontStyle=1;fontColor=#0f2e2a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="900" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="group-region" value="AWS account, Region eu-north-1 (Stockholm)" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=#fafbfa;strokeColor=#6b7280;fontColor=#6b7280;verticalAlign=top;align=left;spacingLeft=10;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="244" y="46" width="1656" height="746" as="geometry"/>
+        </mxCell>
+        <mxCell id="group-vpc" value="VPC: two private subnets in two Availability Zones. No internet gateway, no NAT Gateway." style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;dashed=1;fillColor=#eef6ff;strokeColor=#1565c0;fontColor=#1565c0;verticalAlign=top;align=left;spacingLeft=10;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="966" y="176" width="452" height="484" as="geometry"/>
+        </mxCell>
+        <mxCell id="group-support" value="Used by every part of the system" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=#fafbfa;strokeColor=#9ca3af;fontColor=#9ca3af;verticalAlign=top;align=left;spacingLeft=10;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="244" y="808" width="1656" height="126" as="geometry"/>
+        </mxCell>
+        <mxCell id="note-0" value="Security group: the VPC Lambdas&lt;br&gt;may reach RDS on port 5432 and&lt;br&gt;nothing else. Database login is&lt;br&gt;by IAM token: no password exists." style="shape=note;size=10;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#a6792b;fontColor=#4a3a12;align=left;spacingLeft=6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1230" y="690" width="212" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="note-1" value="S3 and DynamoDB are reached&lt;br&gt;from the VPC through gateway&lt;br&gt;endpoints: free, and traffic&lt;br&gt;stays on the AWS network." style="shape=note;size=10;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#a6792b;fontColor=#4a3a12;align=left;spacingLeft=6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1456" y="690" width="200" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="note-2" value="Journey events are written to&lt;br&gt;DynamoDB by the ingest, score&lt;br&gt;and alert Lambdas at every step,&lt;br&gt;including failed attempts." style="shape=note;size=10;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#a6792b;fontColor=#4a3a12;align=left;spacingLeft=6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1670" y="690" width="216" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="officer" value="&lt;b&gt;Compliance officer&lt;/b&gt;&lt;br&gt;browser or curl" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#17211f;fontColor=#17211f;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="30" y="151" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="cloudfront" value="&lt;b&gt;CloudFront&lt;/b&gt;&lt;br&gt;HTTPS, security headers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ede7f6;strokeColor=#5e35b1;fontColor=#311b92;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="270" y="96" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="webbucket" value="&lt;b&gt;S3 dashboard bucket&lt;/b&gt;&lt;br&gt;private: CloudFront only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontColor=#1b5e20;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="96" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="apigw" value="&lt;b&gt;API Gateway (REST)&lt;/b&gt;&lt;br&gt;API key + usage plan" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ede7f6;strokeColor=#5e35b1;fontColor=#311b92;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="270" y="206" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="query" value="&lt;b&gt;query Lambda&lt;/b&gt;&lt;br&gt;the REST API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;fontColor=#8a3b00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="990" y="206" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="rds" value="&lt;b&gt;RDS PostgreSQL&lt;/b&gt;&lt;br&gt;ledger, no public endpoint" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565c0;fontColor=#0d47a1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1230" y="336" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="raw" value="&lt;b&gt;S3 raw bucket&lt;/b&gt;&lt;br&gt;uploaded CSV files" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontColor=#1b5e20;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="270" y="456" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="ingest" value="&lt;b&gt;ingest Lambda&lt;/b&gt;&lt;br&gt;validate each row (ETL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;fontColor=#8a3b00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="456" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="fifo" value="&lt;b&gt;SQS FIFO queue&lt;/b&gt;&lt;br&gt;ordered per account" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4ec;strokeColor=#ad1457;fontColor=#880e4f;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="750" y="456" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="score" value="&lt;b&gt;score Lambda&lt;/b&gt;&lt;br&gt;apply risk rules" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;fontColor=#8a3b00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="990" y="456" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="dynamo" value="&lt;b&gt;DynamoDB&lt;/b&gt;&lt;br&gt;scores + journey events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565c0;fontColor=#0d47a1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="456" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="alert" value="&lt;b&gt;alert Lambda&lt;/b&gt;&lt;br&gt;HIGH scores only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;fontColor=#8a3b00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1710" y="456" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="quarantine" value="&lt;b&gt;S3 quarantine bucket&lt;/b&gt;&lt;br&gt;invalid rows + reasons" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontColor=#1b5e20;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="270" y="576" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="processed" value="&lt;b&gt;S3 processed bucket&lt;/b&gt;&lt;br&gt;clean rows" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontColor=#1b5e20;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="576" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="dlq" value="&lt;b&gt;FIFO dead-letter queue&lt;/b&gt;&lt;br&gt;after 3 failed attempts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b42318;fontColor=#7f1d1d;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="750" y="576" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="report" value="&lt;b&gt;report Lambda&lt;/b&gt;&lt;br&gt;monthly CSV + JSON" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;fontColor=#8a3b00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="990" y="576" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="reports" value="&lt;b&gt;S3 reports bucket&lt;/b&gt;&lt;br&gt;monthly reports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontColor=#1b5e20;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="576" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="ses" value="&lt;b&gt;Amazon SES&lt;/b&gt;&lt;br&gt;email to compliance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontColor=#1f2937;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1710" y="576" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="ingestdlq" value="&lt;b&gt;ingest dead-letter queue&lt;/b&gt;&lt;br&gt;files that failed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b42318;fontColor=#7f1d1d;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="380" width="164" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="alertdlq" value="&lt;b&gt;alert dead-letter queue&lt;/b&gt;&lt;br&gt;emails that failed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b42318;fontColor=#7f1d1d;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1710" y="380" width="164" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="eventbridge" value="&lt;b&gt;EventBridge rule&lt;/b&gt;&lt;br&gt;cron: 1st of the month" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontColor=#1f2937;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="990" y="700" width="164" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="iam" value="&lt;b&gt;IAM&lt;/b&gt;&lt;br&gt;one least-privilege role per&lt;br&gt;Lambda + permission boundary" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontColor=#1f2937;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="270" y="842" width="196" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="kms" value="&lt;b&gt;KMS key&lt;/b&gt;&lt;br&gt;encrypts buckets, queues&lt;br&gt;and the alarm topic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontColor=#1f2937;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="538" y="842" width="196" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="ssm" value="&lt;b&gt;SSM Parameter Store&lt;/b&gt;&lt;br&gt;application settings&lt;br&gt;no secrets in code" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontColor=#1f2937;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="806" y="842" width="196" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="cloudwatch" value="&lt;b&gt;CloudWatch + SNS&lt;/b&gt;&lt;br&gt;logs, FinTrust/ETL metrics,&lt;br&gt;7 alarms, dashboard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontColor=#1f2937;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1074" y="842" width="196" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="xray" value="&lt;b&gt;X-Ray&lt;/b&gt;&lt;br&gt;tracing on the API stage&lt;br&gt;and every Lambda" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontColor=#1f2937;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1342" y="842" width="196" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="cloudtrail" value="&lt;b&gt;CloudTrail&lt;/b&gt;&lt;br&gt;audit: who changed what&lt;br&gt;in the account" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontColor=#1f2937;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1610" y="842" width="196" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow-0" value="HTTPS" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="officer" target="cloudfront">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-1" value="signed" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="cloudfront" target="webbucket">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-2" value="x-api-key" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="officer" target="apigw">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-3" value="every route needs the API key" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="apigw" target="query">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-4" value="POST /upload stores the file" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="query" target="raw">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1040" y="302"/><mxPoint x="352" y="302"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-5" value="S3 event" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="raw" target="ingest">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-6" value="invalid rows" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ingest" target="quarantine">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-7" value="clean rows" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ingest" target="processed">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-8" value="on failure" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ingest" target="ingestdlq">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-9" value="queued" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="ingest" target="fifo">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-10" value="3 failures" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="fifo" target="dlq">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-11" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="fifo" target="score">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-12" value="ledger + alerts" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="score" target="rds">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-13" value="score + rules" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="score" target="dynamo">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-14" value="read, resolve, flag" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="query" target="rds">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-15" value="journey" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="query" target="dynamo">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1552" y="238"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-16" value="stream" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="dynamo" target="alert">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-17" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="alert" target="ses">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-18" value="on failure" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="alert" target="alertdlq">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-19" value="" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="eventbridge" target="report">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-20" value="read only" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="report" target="rds">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-21" value="CSV + JSON" style="endArrow=block;html=1;rounded=0;strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="report" target="reports">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

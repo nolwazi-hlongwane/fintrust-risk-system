@@ -7,7 +7,7 @@ Table design (one table, two kinds of item):
                                   the transaction id, then the kind of record:
 
         2026-09-15T13:10:00Z#TXN-20260915-000231#SCORE
-        2026-09-15T13:10:00Z#TXN-20260915-000231#EVENT#2026-10-06T09:00:01.120Z#QUEUED
+        2026-09-15T13:10:00Z#TXN-20260915-000231#EVENT#2026-10-06T09:00:01.120417Z#QUEUED
 
 Why the sort key is built like this:
   * It starts with the timestamp, so one account's items are stored in time
@@ -16,6 +16,7 @@ Why the sort key is built like this:
     share the same second. A timestamp alone would let one overwrite the other.
   * SCORE items hold the risk score and the rules that produced it.
     EVENT items record each step of the transaction's journey.
+    ALERT items mark that the alert email for a transaction has been sent.
 
 A global secondary index (by_transaction) lets the API look up one
 transaction's items by transaction_id without knowing the account.
@@ -76,7 +77,10 @@ def _expires_at():
 
 
 def _now_text():
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    # Microseconds, because this time is part of an event's sort key: two events
+    # of the same stage written within one millisecond would otherwise share a
+    # key, and the second would silently replace the first.
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def score_key(tx_timestamp, transaction_id):
@@ -150,6 +154,37 @@ def get_score(account_id, tx_timestamp, transaction_id):
     response = _run(lambda: table().get_item(Key=key), "get_score", transaction_id=transaction_id)
     item = response.get("Item")
     return _clean(item) if item else None
+
+
+def alert_key(tx_timestamp, transaction_id):
+    return f"{tx_timestamp}#{transaction_id}#ALERT"
+
+
+def alert_already_sent(account_id, tx_timestamp, transaction_id):
+    """True if an alert email has already been sent for this transaction.
+
+    A strongly consistent read, so it sees a marker written a moment ago.
+    """
+    key = {"account_id": account_id, "tx_timestamp": alert_key(tx_timestamp, transaction_id)}
+    response = _run(
+        lambda: table().get_item(Key=key, ConsistentRead=True), "alert_already_sent", transaction_id=transaction_id
+    )
+    return "Item" in response
+
+
+def mark_alert_sent(account_id, tx_timestamp, transaction_id, message_id):
+    """Remember that the alert for this transaction was sent, so it is not sent twice."""
+    item = {
+        "account_id": account_id,
+        "tx_timestamp": alert_key(tx_timestamp, transaction_id),
+        "record_type": "ALERT",
+        "transaction_id": transaction_id,
+        "message_id": message_id,
+        "sent_at": _now_text(),
+        "expires_at": _expires_at(),
+    }
+    _run(lambda: table().put_item(Item=item), "mark_alert_sent", transaction_id=transaction_id)
+    return item
 
 
 def query_by_account(account_id, limit=50, newest_first=True, since=None, scores_only=False):

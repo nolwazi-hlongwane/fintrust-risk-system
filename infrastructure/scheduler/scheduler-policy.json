@@ -1,0 +1,21 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StopTheProjectDatabaseOnly",
+      "Effect": "Allow",
+      "Action": [
+        "rds:StopDBInstance"
+      ],
+      "Resource": "arn:aws:rds:__REGION__:__ACCOUNT_ID__:db:__PREFIX__-db"
+    },
+    {
+      "Sid": "StopTheTunnelInstanceOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StopInstances"
+      ],
+      "Resource": "arn:aws:ec2:__REGION__:__ACCOUNT_ID__:instance/__TUNNEL_INSTANCE_ID__"
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 -- FinTrust: database users, one per Lambda that connects to PostgreSQL
 -- Brief slot: Week 13 Day 2 (Data Layer)
 --
--- Run after schema.sql:   psql -f sql/db_users.sql
+-- Run after schema.sql, functions.sql and views.sql:   psql -f sql/db_users.sql
 -- Safe to run more than once.
 --
 -- Least privilege inside the database, as a second layer behind IAM:
@@ -41,15 +41,25 @@ GRANT USAGE ON SCHEMA public TO fintrust_score, fintrust_query, fintrust_report;
 -- score Lambda: checks the account exists, counts recent transactions for the
 -- velocity rule, then inserts the transaction, its rule events and any alert.
 -- It cannot update or delete anything: the ledger is append-only.
-GRANT SELECT ON accounts, transactions TO fintrust_score;
+-- It may read risk_events so that a message delivered a second time can be
+-- answered from what is already stored instead of being scored again.
+GRANT SELECT ON accounts, transactions, risk_events TO fintrust_score;
 GRANT INSERT ON transactions, risk_events, alerts TO fintrust_score;
 
 -- query Lambda: reads everything for the API, and may change only the four
 -- resolution columns of an alert.
 GRANT SELECT ON customers, accounts, transactions, risk_events, alerts TO fintrust_query;
 GRANT UPDATE (status, resolved_at, resolved_by, resolution_note) ON alerts TO fintrust_query;
+-- It cannot insert risk events or update accounts directly. To flag an account
+-- it may only call the flag_account function (see functions.sql).
+GRANT EXECUTE ON FUNCTION flag_account(VARCHAR, VARCHAR) TO fintrust_query;
 
--- report Lambda: read only.
-GRANT SELECT ON customers, accounts, transactions, risk_events, alerts TO fintrust_report;
+-- report Lambda: read only. It is not given the customers table: the monthly
+-- report identifies accounts by id and never needs a name or contact detail.
+GRANT SELECT ON accounts, transactions, risk_events, alerts TO fintrust_report;
+
+-- Views for the compliance team (see views.sql). A view runs with the rights of
+-- its owner, so a user needs only SELECT on the view itself.
+GRANT SELECT ON v_risk_dashboard, v_open_alerts TO fintrust_query, fintrust_report;
 
 COMMIT;

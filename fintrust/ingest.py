@@ -32,7 +32,7 @@ from urllib.parse import unquote_plus
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from fintrust import config, dynamo, rules, validators
+from fintrust import config, dynamo, metrics, rules, validators
 from fintrust.log import get_logger
 
 logger = get_logger("ingest")
@@ -313,11 +313,19 @@ def handler(event, context):
 
         log.info("file_received", size_bytes=record["s3"]["object"].get("size"))
         try:
-            summaries.append(process_file(bucket, key, log))
+            summary = process_file(bucket, key, log)
         except IngestError:
             raise
         except (ClientError, BotoCoreError) as error:
             log.error("aws_call_failed", error=str(error))
             raise IngestError(f"AWS error while processing {key}") from error
+        summaries.append(summary)
+        # Published only when the file finished, so a retried file is counted once.
+        metrics.emit(
+            RowsRead=summary["rows_read"],
+            RowsQueued=summary["rows_queued"],
+            RowsQuarantined=summary["rows_quarantined"],
+            FilesRejected=1 if summary["status"] == "FILE_REJECTED" else 0,
+        )
 
     return {"files": summaries}

@@ -1,0 +1,80 @@
+[
+  {
+    "name": "1 Failed ingestion (files rejected and errors)",
+    "functions": [
+      "ingest"
+    ],
+    "query": "fields @timestamp, level, message, source_key, reason, error\n| filter level = \"ERROR\"\n| sort @timestamp desc\n| limit 50"
+  },
+  {
+    "name": "2 Files processed with row counts",
+    "functions": [
+      "ingest"
+    ],
+    "query": "fields @timestamp, source_key, status, rows_read, rows_valid, rows_quarantined, rows_queued\n| filter message = \"file_processed\"\n| sort @timestamp desc\n| limit 50"
+  },
+  {
+    "name": "3 Reconciliation (rows in = queued + quarantined)",
+    "functions": [
+      "ingest"
+    ],
+    "query": "filter message = \"file_processed\"\n| stats sum(rows_read) as rows_in, sum(rows_queued) as queued, sum(rows_quarantined) as quarantined by bin(1h)"
+  },
+  {
+    "name": "4 Failed scoring attempts",
+    "functions": [
+      "score"
+    ],
+    "query": "fields @timestamp, transaction_id, attempt, error_type, error\n| filter message = \"scoring_failed\"\n| sort @timestamp desc\n| limit 50"
+  },
+  {
+    "name": "5 High risk transactions and the rules that fired",
+    "functions": [
+      "score"
+    ],
+    "query": "fields @timestamp, transaction_id, risk_score, risk_level\n| filter message = \"transaction_scored\" and risk_level = \"HIGH\"\n| sort @timestamp desc\n| limit 50"
+  },
+  {
+    "name": "6 Alert emails sent and failed",
+    "functions": [
+      "alert"
+    ],
+    "query": "fields @timestamp, message, transaction_id, ses_message_id, error\n| filter message in [\"alert_sent\", \"alert_send_failed\", \"alert_already_sent\"]\n| sort @timestamp desc\n| limit 50"
+  },
+  {
+    "name": "7 API errors by route",
+    "functions": [
+      "query"
+    ],
+    "query": "filter level = \"ERROR\" or status >= 400\n| stats count(*) as responses by resource, status\n| sort responses desc"
+  },
+  {
+    "name": "8 One transaction across the whole pipeline",
+    "functions": [
+      "ingest",
+      "score",
+      "alert",
+      "query",
+      "report"
+    ],
+    "query": "fields @timestamp, service, level, message, attempt, risk_score, error\n| filter transaction_id = \"PASTE-TRANSACTION-ID-HERE\"\n| sort @timestamp asc"
+  },
+  {
+    "name": "9 All errors in every function",
+    "functions": [
+      "ingest",
+      "score",
+      "alert",
+      "query",
+      "report"
+    ],
+    "query": "fields @timestamp, service, message, transaction_id, source_key, error\n| filter level = \"ERROR\"\n| sort @timestamp desc\n| limit 100"
+  },
+  {
+    "name": "10 Monthly reports written and failed",
+    "functions": [
+      "report"
+    ],
+    "query": "fields @timestamp, level, message, month, transactions, accounts, high_risk_accounts, json_key, error\n| filter message in [\"report_written\", \"report_failed\", \"control_totals_disagree\"]\n| sort @timestamp desc\n| limit 50"
+  }
+]

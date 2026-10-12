@@ -1,7 +1,9 @@
 # Entity Relationship Diagram
 
 **Brief slot:** Week 13 Day 1: Design Kickoff (draft); confirmed in Week 13 Day 2: Data Layer.
-**Status:** matches `sql/schema.sql` exactly. This is checked automatically: `tests/integration/test_erd_matches_schema.py` reads the tables, columns, types and keys from a real PostgreSQL database and fails the build if this diagram differs. The PDF export is added to `docs/diagrams/` with the final diagrams in Week 14 Day 5.
+**Status:** matches `sql/schema.sql` exactly. This is checked automatically: `tests/integration/test_erd_matches_schema.py` reads the tables, columns, types and keys from a real PostgreSQL database and fails the build if this diagram differs. The diagram deliverable is [diagrams/erd.pdf](diagrams/erd.pdf), with an editable draw.io source in [diagrams/erd.drawio](diagrams/erd.drawio); both are generated from the diagram source below, so they match it.
+
+![FinTrust ERD](diagrams/erd.svg)
 
 ```mermaid
 erDiagram
@@ -82,6 +84,18 @@ erDiagram
 | Ledger rows cannot be orphaned | `ON DELETE RESTRICT` on every foreign key |
 
 Indexes: `transactions(account_id)`, `transactions(tx_date)`, `transactions(account_id, tx_date)`, `transactions(risk_level)`, `accounts(customer_id)`, `risk_events(account_id)`, `risk_events(transaction_id)`, `alerts(status)`.
+
+## Views and the stored function
+
+These are not entities, so they are not in the diagram. They are built on the five tables above.
+
+| Object | Kind | Built on | Purpose |
+|---|---|---|---|
+| `v_risk_dashboard` | View | `accounts`, `transactions`, `alerts`, `risk_events` | One row per account with its risk picture |
+| `v_open_alerts` | View | `alerts`, `transactions`, `accounts`, `risk_events` | The open alert work queue |
+| `flag_account(account_id, reason)` | Function | `accounts`, `risk_events` | Flags an account and records why, atomically |
+
+See [sql-analytics.md](sql-analytics.md).
 
 ## Relationship to DynamoDB
 

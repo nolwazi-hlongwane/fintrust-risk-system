@@ -43,7 +43,20 @@ _connection = None
 
 
 class DatabaseError(Exception):
-    """A database operation failed. The transaction has been rolled back."""
+    """A database operation failed. The transaction has been rolled back.
+
+    `pgcode` is PostgreSQL's five-character error code (SQLSTATE) when there is
+    one, e.g. 23503 for a foreign key violation. Callers use it to tell a
+    "not found" apart from a real fault without parsing message text.
+    """
+
+    def __init__(self, message, pgcode=None):
+        super().__init__(message)
+        self.pgcode = pgcode
+
+
+class DatabaseUnavailable(DatabaseError):
+    """The database could not be reached at all (for example, RDS is stopped)."""
 
 
 def _connect():
@@ -90,7 +103,7 @@ def get_connection():
         except psycopg2.Error as error:
             _connection = None
             logger.error("db_connect_failed", error=str(error).strip())
-            raise DatabaseError("Could not connect to the database") from error
+            raise DatabaseUnavailable("Could not connect to the database") from error
     return _connection
 
 
@@ -145,7 +158,7 @@ def transaction():
             sqlstate=getattr(error, "pgcode", None),
             error=str(error).strip(),
         )
-        raise DatabaseError(str(error).strip()) from error
+        raise DatabaseError(str(error).strip(), getattr(error, "pgcode", None)) from error
     except Exception:
         # Not a database error (for example a bug in the calling code), but the
         # work done so far must still be undone.

@@ -14,6 +14,7 @@ markers = [
 
 [tool.ruff]
 line-length = 120
+extend-exclude = ["build"]   # downloaded third-party code packaged for Lambda
 target-version = "py313"
 
 [tool.ruff.lint]
@@ -22,3 +23,5 @@ select = ["E", "F", "W", "I", "B"]
 [tool.ruff.lint.per-file-ignores]
 # Test data rows (CSV lines, parametrised cases) read better on one line.
 "tests/**" = ["E501"]
+# Lines of SVG and draw.io markup are clearer unbroken.
+"scripts/build_diagrams.py" = ["E501"]

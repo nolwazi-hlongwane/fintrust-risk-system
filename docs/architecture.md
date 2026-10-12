@@ -5,9 +5,20 @@ The final draw.io diagram and its PDF export are kept in `docs/diagrams/`.
 
 ## Diagram
 
+The architecture diagram, showing every service, data flow and security boundary:
+
+![FinTrust architecture](diagrams/architecture.svg)
+
+- PDF: [diagrams/architecture.pdf](diagrams/architecture.pdf)
+- Editable draw.io source: [diagrams/architecture.drawio](diagrams/architecture.drawio)
+
+The same flow as a text diagram (renders on GitHub):
+
 ```mermaid
 flowchart LR
-    U[Compliance officer<br/>dashboard / curl] -->|x-api-key| APIGW[API Gateway<br/>REST API + usage plan]
+    U[Compliance officer<br/>browser] -->|HTTPS| CF[CloudFront]
+    CF -->|origin access control| WEB[(S3 dashboard bucket<br/>private)]
+    U -->|x-api-key| APIGW[API Gateway<br/>REST API + usage plan]
     APIGW --> Q[query Lambda<br/>in VPC]
     Q -->|POST /upload stores CSV| RAW[(S3 raw bucket)]
     RAW -->|ObjectCreated event| ING[ingest Lambda<br/>outside VPC]
@@ -74,25 +85,12 @@ Three consequences, each a deliberate decision:
 | **API Gateway** | Managed, multi-AZ | API key, usage plan throttling, TLS only | Handles bursts without servers | 1M calls free |
 | **SES** | Managed delivery with retries | Verified identities only; role limited to one sender | Asynchronous from scoring | 3,000 messages free |
 | **EventBridge** | Managed scheduler with retries | Can invoke only the report Lambda | Not applicable | Free |
+| **CloudFront** | Served from many edge locations | HTTPS only; origin access control keeps the bucket private; security headers on every file | Cached close to the user, including South African edge locations | 1 TB and 10 million requests free |
 | **CloudWatch** | Alarms detect failure early | Logs carry identifiers, never personal details | Logs Insights queries on JSON fields | Within 10 metrics and 10 alarms |
 | **KMS** | Key managed and backed up by AWS | Customer-managed key, key policy, rotation enabled | Transparent | About $1 per month |
 | **VPC endpoints (gateway)** | Not a single point of failure | Traffic to S3 and DynamoDB stays on the AWS network | No NAT hop | Free, replaces a $32 per month NAT Gateway |
 
 **Why two databases?** The ledger needs relationships, constraints and transactions that either fully happen or fully roll back, so it is relational (RDS). Scores and journey events are written once and read by a known key (account, then time), so they suit a key-value store (DynamoDB). This is the "purpose-built database" principle.
-
-## The network design (no NAT Gateway)
-
-A Lambda inside a private subnet has no route to the internet, so it can only reach AWS services that have a free gateway endpoint: S3 and DynamoDB.
-
-| Lambda | In VPC? | Talks to | Why |
-|---|---|---|---|
-| ingest | No | S3, SQS, DynamoDB | Never touches RDS, and needs SQS, which has no free endpoint. |
-| score | Yes | RDS, DynamoDB | Needs RDS. SQS delivers messages to it, so it needs no route to SQS. |
-| alert | No | SES, DynamoDB | SES has no free endpoint. Never touches RDS. |
-| query | Yes | RDS, DynamoDB, S3 | Needs RDS. |
-| report | Yes | RDS, S3 | Needs RDS. |
-
-Consequences: the alert Lambda is triggered by a DynamoDB Stream instead of a direct call; the database uses IAM authentication instead of a stored password; and the VPC Lambdas receive their configuration as environment variables copied from SSM at deploy time.
 
 ## Failure handling
 
@@ -102,5 +100,7 @@ Consequences: the alert Lambda is triggered by a DynamoDB Stream instead of a di
 | The ingest Lambda crashes | Lambda retries twice, then sends the event to the ingest DLQ | Re-upload the file or replay the event |
 | The score Lambda fails on a message | The database transaction is rolled back; SQS redelivers; after 3 failed receives the message moves to the FIFO DLQ and an alarm fires | Fix the cause, then redrive the DLQ |
 | One account's message is stuck | Only that account's message group waits; other accounts keep flowing | Automatic once the message reaches the DLQ |
-| SES rejects an email | The ledger and score are already saved; the stream retries the alert | Automatic retry, then on-failure destination |
+| SES rejects an email | The ledger, the score and the alert row are already saved; the stream retries the email 3 times, then the record's details go to the alert dead-letter queue | Fix the cause (for example an unverified address); the alert is still listed by `GET /alerts` |
 | An Availability Zone fails | Lambda, SQS, DynamoDB, S3 and API Gateway continue in other AZs. RDS single-AZ is the one exposed component | Production design: RDS Multi-AZ with automatic failover (not deployed: outside Free Tier) |
+
+The Availability Zone case is worked through component by component in the [Well-Architected review](well-architected-review.md#3-reliability). The dead-letter recovery is proven on the real account by `scripts/e2e_test.py`.
