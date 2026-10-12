@@ -24,6 +24,7 @@ How the Lambda logs in (db_auth_mode):
 """
 
 from contextlib import contextmanager
+from pathlib import Path
 
 import boto3
 import psycopg2
@@ -200,3 +201,17 @@ def is_healthy():
         return fetch_one("SELECT 1 AS ok") == {"ok": 1}
     except DatabaseError:
         return False
+
+
+# The project's own SQL files (sql/monthly_summary.sql and sql/risk_report.sql)
+# are run by the Lambdas as they are, so the SQL artefacts, the monthly report
+# and the API can never disagree. In Lambda the deploy script copies them into
+# the package (fintrust/sql/); in the repository they are in sql/ at the top.
+_PACKAGED_SQL = Path(__file__).resolve().parent / "sql"
+SQL_DIR = _PACKAGED_SQL if _PACKAGED_SQL.is_dir() else Path(__file__).resolve().parents[1] / "sql"
+
+
+def read_sql_file(name):
+    """One of the project's SQL files, without its final semicolon so it can be
+    wrapped as a subquery. Raises OSError if the file is not in the package."""
+    return (SQL_DIR / name).read_text(encoding="utf-8").strip().rstrip(";").rstrip() + "\n"
