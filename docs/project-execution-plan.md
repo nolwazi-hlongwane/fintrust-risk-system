@@ -181,7 +181,7 @@ Each phase is labelled with its brief slot. Real dates are compressed into four 
 
 After every phase: run the tests, check against the brief and rubric, record the result in `docs/build-log.md`, and stop for review.
 
-## 8. What Nolwazi must do by hand
+## 8. Manual steps in the AWS console and GitHub
 
 | When | Task |
 |---|---|

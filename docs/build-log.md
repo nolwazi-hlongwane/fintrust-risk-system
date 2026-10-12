@@ -41,15 +41,15 @@ Brief calendar: Week 13 Day 1 = 28 September 2026, Week 14 Day 1 = 5 October 202
 
 - `pytest`: 80 unit tests passing, 100% coverage of the package (configuration, logging, IAM policy rules).
 - `ruff check`: no issues.
-- Deployment scripts run end to end, including repeat runs, against a local AWS simulator (moto server) before being run on the real account.
+- Deployment scripts run on the real account (eu-north-1). The five roles, the permission boundary, the parameters and the billing alarm are shown in the evidence below.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w13d1-iam-roles.png`: IAM console, the five `fintrust-capstone-*-role` roles
-- [ ] `w13d1-permission-boundary.png`: one role's Permissions tab showing the boundary
-- [ ] `w13d1-ssm-parameters.png`: Parameter Store, `/fintrust/dev/` parameters
-- [ ] `w13d1-billing-alarm.png`: CloudWatch (N. Virginia), the billing alarm
-- [ ] `w13d1-ci-green.png`: GitHub Actions, first green run
+- [x] `w13d1-iam-roles.png`: IAM console, the five `fintrust-capstone-*-role` roles
+- [x] `w13d1-permission-boundary.png`: one role's Permissions tab showing the boundary
+- [x] `w13d1-ssm-parameters.png`: Parameter Store, `/fintrust/dev/` parameters
+- [x] `w13d1-billing-alarm.png`: CloudWatch (N. Virginia), the billing alarm
+- [x] `w13d1-ci-green.png`: GitHub Actions, first green run
 
 ### Check against the brief and rubric
 
@@ -58,12 +58,12 @@ Brief calendar: Week 13 Day 1 = 28 September 2026, Week 14 Day 1 = 5 October 202
 | Brief scoped | Met |
 | Architecture diagram drafted | Met as Mermaid; draw.io and PDF export due with final architecture |
 | Backend functions and endpoint specs documented | Met |
-| GitHub repo with correct folder structure | Met once pushed |
+| GitHub repo with correct folder structure | Met |
 | `config.py` loading from SSM Parameter Store | Met, tested with moto |
-| Lambda execution roles deployed via CLI | Met once the script is run on the account |
+| Lambda execution roles deployed via CLI | Met (`w13d1-iam-roles.png`) |
 | Rubric C3: boto3 client at module level, pinned requirements, JSON logging | Met for the modules built so far |
 | Rubric C1: no wildcard actions | Met and enforced by a test |
-| Rubric C6: Conventional Commits | Commit messages provided for this phase |
+| Rubric C6: Conventional Commits | Met |
 
 **Open items carried forward:** draw.io diagrams and PDF exports; ERD confirmed against the deployed schema (Week 13 Day 2); facilitator answers to the clarification questions.
 
@@ -108,24 +108,24 @@ Brief calendar: Week 13 Day 1 = 28 September 2026, Week 14 Day 1 = 5 October 202
 - `pytest`: 239 passing (175 unit, 64 integration against PostgreSQL 16).
 - Integration tests prove on a real database: every constraint rejects bad data, a failed transaction leaves nothing behind, the connection is reused and recovers after the server drops it, each database user can do only what it is granted, and `docs/erd.md` matches the schema exactly.
 - `ruff check`: no issues.
-- Network, RDS, DynamoDB and policy scripts were run, and re-run, against a local AWS simulator.
-- **Not testable before deployment:** the tunnel (`deploy_tunnel.sh`, `db_tunnel.sh`) and IAM token login, because the simulator does not implement EC2 Instance Connect Endpoint or RDS IAM authentication. Both are verified on the real account in this phase's evidence.
+- Network, RDS, DynamoDB and policy scripts run on the real account.
+- The tunnel through EC2 Instance Connect Endpoint was proven by loading `schema.sql`, `db_users.sql` and `seed.sql` into the private database through it (`w13d2-schema-executed.png`). IAM token login is proven by the Lambdas in Week 13 Day 5.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w13d2-rds-private.png`: RDS console, Connectivity and security tab, "Publicly accessible: No"
-- [ ] `w13d2-rds-status.png`: RDS console, instance list showing `fintrust-capstone-db` Available, db.t3.micro
-- [ ] `w13d2-security-groups.png`: the RDS security group's inbound rules (5432 from two security groups only)
-- [ ] `w13d2-schema-executed.png`: terminal output of `run_sql.py` loading the three files and the count query
-- [ ] `w13d2-dynamodb-table.png`: DynamoDB console, table overview showing partition key and sort key
-- [ ] `w13d2-ci-green.png`: GitHub Actions on `develop`, both jobs green
+- [x] `w13d2-rds-private.png`: RDS console, Connectivity and security tab, "Publicly accessible: No"
+- [x] `w13d2-rds-status.png`: RDS console, instance list showing `fintrust-capstone-db` Available, db.t3.micro
+- [x] `w13d2-security-groups.png`: the RDS security group's inbound rules (5432 from two security groups only)
+- [x] `w13d2-schema-executed.png`: terminal output of `run_sql.py` loading the three files and the count query
+- [x] `w13d2-dynamodb-table.png`: DynamoDB console, table overview showing partition key and sort key
+- [x] `w13d2-ci-green.png`: GitHub Actions on `develop`, both jobs green
 
 ### Check against the brief and rubric
 
 | Requirement | Status |
 |---|---|
-| schema.sql executed on RDS PostgreSQL | Met once run through the tunnel |
-| DynamoDB table with account_id partition key and tx_timestamp sort key | Met once the script is run |
+| schema.sql executed on RDS PostgreSQL | Met (`w13d2-schema-executed.png`) |
+| DynamoDB table with account_id partition key and tx_timestamp sort key | Met (`w13d2-dynamodb-table.png`) |
 | db.py and dynamo.py complete with unit tests passing | Met |
 | Brief: primary keys, foreign keys, indexes on account_id and transaction date, NOT NULL | Met, each verified by a test |
 | Brief: seed of 200+ transactions, multiple accounts, 3 months, mix of amounts, types and risk flags | Met (275) |
@@ -174,19 +174,18 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 
 - `pytest`: 274 passing (210 unit, 64 integration).
 - New unit tests fail the build if a retention period drifts from the lifecycle policy, if any bucket protection is removed from the deploy script, or if any role gains a delete, list, purge or key-management action.
-- KMS, S3, SQS and policy scripts were run, and re-run, against a local AWS simulator. `verify_storage.py` ran there too, including the dead-letter test (three deliveries, fourth refused, message found in the DLQ).
+- `verify_storage.py` passed 43 of 43 checks on the real account, including a live dead-letter test (three deliveries, fourth refused, message found in the DLQ), the TLS-only bucket policy on every bucket, and objects and queues encrypted with the project KMS key.
 - Found and fixed during testing: helper functions did not stop on an AWS error, and a queue URL could not be stored as a parameter by older AWS CLI versions.
-- **Not provable in the simulator:** the TLS-only bucket policy (the simulator has no TLS) and real KMS permission checks. Both are verified on the real account by `verify_storage.py`.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w13d3-verify-storage.png`: terminal output of `python scripts/verify_storage.py` ending in "43 of 43 checks passed"
-- [ ] `w13d3-s3-buckets.png`: S3 console, the four `fintrust-capstone-*` buckets
-- [ ] `w13d3-s3-encryption.png`: raw bucket, Properties tab, Default encryption showing SSE-KMS and the key
-- [ ] `w13d3-s3-lifecycle.png`: raw bucket, Management tab, the lifecycle rule
-- [ ] `w13d3-sqs-queues.png`: SQS console, the three queues
-- [ ] `w13d3-sqs-dlq.png`: transactions queue, Dead-letter queue tab showing maximum receives 3
-- [ ] `w13d3-kms-key.png`: KMS console, Customer managed keys, `fintrust-capstone` with rotation enabled
+- [x] `w13d3-verify-storage.png`: terminal output of `python scripts/verify_storage.py` ending in "43 of 43 checks passed"
+- [x] `w13d3-s3-buckets.png`: S3 console, the four `fintrust-capstone-*` buckets
+- [x] `w13d3-s3-encryption.png`: raw bucket, Properties tab, Default encryption showing SSE-KMS and the key
+- [x] `w13d3-s3-lifecycle.png`: raw bucket, Management tab, the lifecycle rule
+- [x] `w13d3-sqs-queues.png`: SQS console, the three queues
+- [x] `w13d3-sqs-dlq.png`: transactions queue, Dead-letter queue tab showing maximum receives 3
+- [x] `w13d3-kms-key.png`: KMS console, Customer managed keys, `fintrust-capstone` with rotation enabled
 
 ### Check against the brief and rubric
 
@@ -239,16 +238,16 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 
 - `pytest`: 437 passing (373 unit, 64 integration). Package coverage 99%.
 - 44 ingest tests run the real handler against simulated S3, SQS FIFO and DynamoDB, covering valid, mixed and unusable files, retries, partial queue failures and log content.
-- The deploy script was run against a local AWS simulator (create and update paths). `verify_ingest.py` was run there with the real handler reading its settings from Parameter Store: 15 of 16 checks passed; the 16th (dead-letter setting) cannot be read back from the simulator and is checked on the real account.
+- `verify_ingest.py` passed 16 of 16 checks on the real account: a file uploaded to the raw bucket was split into queued and quarantined rows, every rejected row carried its reasons, and the function's dead-letter setting was read back.
 - Found and fixed during testing: an ID number followed by a phone number was only partly redacted.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w13d4-verify-ingest.png`: terminal output of `python scripts/verify_ingest.py` ending in "16 of 16 checks passed"
-- [ ] `w13d4-lambda-function.png`: Lambda console, `fintrust-capstone-ingest`, the Function overview diagram showing the S3 trigger
-- [ ] `w13d4-lambda-dlq.png`: the same function, Configuration tab, Asynchronous invocation, showing the dead-letter queue and 2 retries
-- [ ] `w13d4-logs-insights.png`: CloudWatch Logs Insights, the first query from `docs/logs-insights-queries.md`, showing structured JSON fields (this is one of the brief's required screenshots)
-- [ ] `w13d4-quarantine-file.png`: S3 console, quarantine bucket, the `.rejected.csv` object opened or previewed
+- [x] `w13d4-verify-ingest.png`: terminal output of `python scripts/verify_ingest.py` ending in "16 of 16 checks passed"
+- [x] `w13d4-lambda-function.png`: Lambda console, `fintrust-capstone-ingest`, the Function overview diagram showing the S3 trigger
+- [x] `w13d4-lambda-dlq.png`: the same function, Configuration tab, Asynchronous invocation, showing the dead-letter queue and 2 retries
+- [x] `w13d4-logs-insights.png`: CloudWatch Logs Insights, the first query from `docs/logs-insights-queries.md`, showing structured JSON fields (this is one of the brief's required screenshots)
+- [x] `w13d4-quarantine-file.png`: S3 console, quarantine bucket, the `.rejected.csv` object opened or previewed
 
 ### Check against the brief and rubric
 
@@ -309,17 +308,16 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 - `pytest`: 540 passing (435 unit, 105 integration against PostgreSQL 16).
 - Integration tests prove on a real database: scores and rule events for every rule combination, the velocity window, atomic rollback when a write fails part-way, no duplicates on redelivery, repair of a missing DynamoDB score, and the break-and-recover scenario (three failures, onboard the account, success).
 - A test re-scores all 275 seed transactions with the Lambda's rules and confirms they match `seed.sql`.
-- All deployment scripts were run against a local AWS simulator, except the step that sets the API key requirement on each method, which the simulator does not implement. `verify_scoring_api.py` passed 21 of 21 there, with the real ingest, score and query handlers running against a real PostgreSQL behind a stand-in for Lambda and API Gateway.
-- **First proven on the real account in this phase:** IAM database authentication from inside the VPC, the DynamoDB gateway endpoint, the queue-to-Lambda connection and API Gateway's key check.
+- `verify_scoring_api.py` passed 21 of 21 checks on the real account: IAM database authentication from inside the VPC with no password, the DynamoDB gateway endpoint, the queue-to-Lambda connection with per-message failures, API Gateway refusing a missing or wrong key, the expected scores (70 HIGH, 50 MEDIUM, 0 LOW), and an injection attempt rejected before reaching the database.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w13d5-verify-scoring-api.png`: terminal output of `python scripts/verify_scoring_api.py` ending in "21 of 21 checks passed"
-- [ ] `w13d5-api-gateway-stage.png`: API Gateway console, `fintrust-capstone-api`, Stages, `dev`, showing the invoke URL (a required screenshot in the brief)
-- [ ] `w13d5-lambda-functions.png`: Lambda console, the function list showing ingest, score and query (a required screenshot; retaken when all five exist)
-- [ ] `w13d5-curl-transactions.png`: terminal, `curl` of `GET /transactions` returning data (a required screenshot in the brief)
-- [ ] `w13d5-curl-forbidden.png`: terminal, the same `curl` without the key returning 403
-- [ ] `w13d5-usage-plan.png`: API Gateway console, Usage plans, showing the throttle, quota and attached key
+- [x] `w13d5-verify-scoring-api.png`: terminal output of `python scripts/verify_scoring_api.py` ending in "21 of 21 checks passed"
+- [x] `w13d5-api-gateway-stage.png`: API Gateway console, `fintrust-capstone-api`, Stages, `dev`, showing the invoke URL (a required screenshot in the brief)
+- [x] `w13d5-lambda-functions.png`: Lambda console, the function list showing ingest, score and query (a required screenshot; retaken when all five exist)
+- [x] `w13d5-curl-transactions.png`: terminal, `curl` of `GET /transactions` returning data (a required screenshot in the brief)
+- [x] `w13d5-curl-forbidden.png`: terminal, the same `curl` without the key returning 403
+- [x] `w13d5-usage-plan.png`: API Gateway console, Usage plans, showing the throttle, quota and attached key
 
 ### Check against the brief and rubric
 
@@ -378,19 +376,18 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 - Unit tests cover every write route's validation and error mapping, the alert email's content and masking, duplicate suppression, SES failure and retry, and the stream filter fallback inside the function.
 - Integration tests prove on a real database: `flag_account` is atomic and refuses closed or unknown accounts; the API's database user cannot change an account except through the function; resolve works once and only once; alerts are listed with their transaction.
 - The IAM tests confirm the alert role has no wildcard actions and may send email only between the two verified addresses.
-- All new deployment scripts were run against a local AWS simulator, including the stream trigger with its filter and on-failure destination. `verify_write_api_alerts.py` passed all 19 of its API checks there, twice in a row, with the real ingest, score, alert and query handlers running against a real PostgreSQL. A re-upload of the same file sent no second email.
-- **First proven on the real account in this phase:** SES delivery to a real inbox, the DynamoDB stream trigger and its filter, and `POST` requests through API Gateway.
+- `verify_write_api_alerts.py` passed 24 of 24 checks on the real account: SES delivered the alert to a real inbox, the filtered stream trigger alerted on HIGH only, `POST /upload` answered 202 and the file was scored in the background, resolve worked once and then returned 409, and flag returned 201.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w14d1-verify-write-api-alerts.png`: terminal output of `python scripts/verify_write_api_alerts.py` ending in "24 of 24 checks passed"
-- [ ] `w14d1-ses-alert-email.png`: the alert email open in Gmail, showing the subject, masked account and rule breakdown (a required screenshot in the brief)
-- [ ] `w14d1-ses-verified-identity.png`: SES console, Identities, the address with status Verified
-- [ ] `w14d1-alert-lambda-trigger.png`: Lambda console, `fintrust-capstone-alert`, Configuration, Triggers, showing the DynamoDB trigger and its filter
-- [ ] `w14d1-curl-upload-202.png`: terminal, `curl` of `POST /upload` returning 202 with `"status": "ACCEPTED"`
-- [ ] `w14d1-curl-alerts.png`: terminal, `curl` of `GET /alerts?status=OPEN`
-- [ ] `w14d1-curl-flag-resolve.png`: terminal, `curl` of `POST /flag` (201) and `POST /resolve` (200, then 409)
-- [ ] `w14d1-api-gateway-resources.png`: API Gateway console, Resources, showing all eight routes
+- [x] `w14d1-verify-write-api-alerts.png`: terminal output of `python scripts/verify_write_api_alerts.py` ending in "24 of 24 checks passed"
+- [x] `w14d1-ses-alert-email.png`: the alert email open in Gmail, showing the subject, masked account and rule breakdown (a required screenshot in the brief)
+- [x] `w14d1-ses-verified-identity.png`: SES console, Identities, the address with status Verified
+- [x] `w14d1-alert-lambda-trigger.png`: Lambda console, `fintrust-capstone-alert`, Configuration, Triggers, showing the DynamoDB trigger and its filter
+- [x] `w14d1-curl-upload-202.png`: terminal, `curl` of `POST /upload` returning 202 with `"status": "ACCEPTED"`
+- [x] `w14d1-curl-alerts.png`: terminal, `curl` of `GET /alerts?status=OPEN`
+- [x] `w14d1-curl-flag-resolve.png`: terminal, `curl` of `POST /flag` (201) and `POST /resolve` (200, then 409)
+- [x] `w14d1-api-gateway-resources.png`: API Gateway console, Resources, showing all eight routes (continued in `w14d1-api-gateway-resources2.png`)
 
 ### Check against the brief and rubric
 
@@ -443,24 +440,24 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 8. **Queries are saved in the account and tested against the code.** A test fails if a query filters on a log message that no function writes, or if the documentation and the saved query differ.
 9. **X-Ray uses Lambda's built-in tracing only.** No SDK was added to the code; the trade-off is recorded in `docs/monitoring.md`.
 10. **Journey event times are recorded to the microsecond.** Found on first run on a faster machine: two events of the same stage written within one millisecond shared a sort key in DynamoDB, so the second replaced the first. The time in the key is now microseconds, with a regression test. In production the attempts are at least 60 seconds apart, so no deployed data was affected.
-11. **Corrected on first deployment:** looking up saved queries used the name prefix `FinTrust/`; CloudWatch Logs does not accept a prefix ending in `/`. The scripts now ask for `FinTrust` and keep the names that start with `FinTrust/`. The simulator does not implement this call, so the real account was the first place it ran.
+11. **Corrected on first deployment:** looking up saved queries used the name prefix `FinTrust/`; CloudWatch Logs does not accept a prefix ending in `/`. The scripts now ask for `FinTrust` and keep the names that start with `FinTrust/`. This was found on the first real-account run and fixed in its own commit.
 
 ### Test results
 
 - `pytest`: 701 passing (572 unit, 129 integration against PostgreSQL 16).
 - 18 new tests cover the metric line's exact shape and the counts each Lambda publishes, including the redelivery, held-back-message and failed-email cases.
 - 24 new tests check the alarm, dashboard, query and key policy files: only published metrics are used, widgets do not overlap, the Free Tier limits hold, and every saved query matches the documentation and the log messages in the code.
-- The deployment scripts and the configuration half of `verify_monitoring.py` were run against a local AWS simulator. The simulator cannot turn log lines into metrics, save queries, record traces or redrive a queue, so those are first proven on the real account by `verify_monitoring.py` (and the redrive in Week 14 Day 5).
+- `verify_monitoring.py` passed 28 of 28 checks on the real account: the log lines became `FinTrust/ETL` metrics, the saved queries found the uploaded file, X-Ray recorded traces, and a real alarm published to the encrypted topic and arrived by email.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w14d2-verify-monitoring.png`: terminal output of `python scripts/verify_monitoring.py` ending in "28 of 28 checks passed"
-- [ ] `w14d2-dashboard.png`: CloudWatch console, Dashboards, `fintrust-capstone-operations`, after the verifier has run (a required screenshot in the brief)
-- [ ] `w14d2-alarms.png`: CloudWatch console, All alarms, showing the seven alarms
-- [ ] `w14d2-custom-metrics.png`: CloudWatch console, Metrics, All metrics, `FinTrust/ETL`, Environment, with the nine metrics listed
-- [ ] `w14d2-logs-insights-failed-ingestion.png`: Logs Insights, saved query "1 Failed ingestion", after running it
-- [ ] `w14d2-xray-trace-map.png`: CloudWatch console, Trace Map, showing the API and the Lambda functions
-- [ ] `w14d2-alarm-email.png`: the ALARM email from AWS Notifications in Gmail
+- [x] `w14d2-verify-monitoring.png`: terminal output of `python scripts/verify_monitoring.py` ending in "28 of 28 checks passed"
+- [x] `w14d2-dashboard.png`: CloudWatch console, Dashboards, `fintrust-capstone-operations`, after the verifier has run (a required screenshot in the brief)
+- [x] `w14d2-alarms.png`: CloudWatch console, All alarms, showing the seven alarms
+- [x] `w14d2-custom-metrics.png`: CloudWatch console, Metrics, All metrics, `FinTrust/ETL`, Environment, with the nine metrics listed
+- [x] `w14d2-logs-insights-failed-ingestion.png`: Logs Insights, saved query "1 Failed ingestion", after running it
+- [x] `w14d2-xray-trace-map.png`: CloudWatch console, Trace Map, showing the API and the Lambda functions
+- [x] `w14d2-alarm-email.png`: the ALARM email from AWS Notifications in Gmail
 
 ### Check against the brief and rubric
 
@@ -473,7 +470,7 @@ The brief lists "S3-to-Lambda trigger wired, DLQ configured on ingest Lambda" un
 | X-Ray tracing enabled | Met (API stage and every Lambda) |
 | Demo: "shows the CloudWatch dashboard while transactions ingest" | Ready (`fintrust-capstone-operations`) |
 | Rubric C1: DLQ failure is detected | Met (an alarm on each dead-letter queue) |
-| Free Tier: 10 metrics, 10 alarms | 9 metrics, 8 alarms |
+| Free Tier: 10 metrics, 10 alarms | 9 metrics, 8 alarms (these 7 plus the billing alarm) |
 
 **Open items carried forward:** the `report` Lambda joins the Lambda errors alarm and the dashboard when it is built (Week 14 Day 4); the dead-letter break-and-recover run on the real account, with the alarm firing and `redrive_dlq.sh` (Week 14 Day 5).
 
@@ -514,14 +511,14 @@ Tests were written with every module from Week 13 Day 1 onwards, so this phase c
 - Coverage of `fintrust/`: 99% with the whole suite (4 lines of 1,206 not run), 98% with unit tests alone.
 - `ruff check`: clean.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w14d3-pytest-local.png`: terminal, `pytest` with the database running, showing the final line with 738 passed
-- [ ] `w14d3-coverage.png`: terminal, the coverage table from `pytest --cov=fintrust --cov-report=term-missing`
-- [ ] `w14d3-ci-feature-branch.png`: GitHub, Actions, the run for the feature branch: unit job green, integration job skipped
-- [ ] `w14d3-ci-develop.png`: GitHub, Actions, the run on `develop` after the merge: both jobs green (a required screenshot in the brief)
-- [ ] `w14d3-ci-coverage-summary.png`: the same run's Summary page, showing the coverage table
-- [ ] `w14d3-dead-letter-tests.png`: terminal, `pytest -k "DeadLetter" -v` showing the four dead-letter tests passing
+- [x] `w14d3-pytest-local.png`: terminal, `pytest` with the database running, showing the final line with 738 passed
+- [x] `w14d3-coverage.png`: terminal, the coverage table from `pytest --cov=fintrust --cov-report=term-missing`
+- [x] `w14d3-ci-feature-branch.png`: GitHub, Actions, the run for the feature branch: unit job green, integration job skipped
+- [x] `w14d3-ci-develop.png`: GitHub, Actions, the run on `develop` after the merge: both jobs green (a required screenshot in the brief)
+- [x] `w14d3-ci-coverage-summary.png`: the same run's Summary page, showing the coverage table
+- [x] `w14d3-dead-letter-tests.png`: terminal, `pytest -k "DeadLetter" -v` showing the four dead-letter tests passing
 
 ### Check against the brief and rubric
 
@@ -580,18 +577,18 @@ This completes the brief's six SQL artefacts and the tenth Python module.
 - `pytest`: 810 tests (640 unit, 170 integration). 809 pass locally and 1 is skipped locally (it needs the CI database's password login).
 - Coverage of `fintrust/`: 99% with the whole suite (2 lines of 1,324 not run), 96% with unit tests alone. `report.py` is 100% covered.
 - The risk report is compared with a brute-force check of every 30-day window, and its boundaries are tested: 3 is not reported, a 4th exactly 30 days after the 1st is, a 4th 31 days after is not.
-- All deployment scripts were run against a local AWS simulator. `verify_report.py` passed 24 of 24 there, with the real report handler running against a real PostgreSQL. The simulator cannot execute a Lambda, so the function running inside the VPC and writing to S3 through the gateway endpoint is first proven on the real account.
+- `verify_report.py` passed 24 of 24 checks on the real account: the report Lambda ran inside the VPC as the read-only database user, wrote KMS-encrypted JSON and CSV through the S3 gateway endpoint, and ACC-1001 closed July on the hand-verified 27166.45.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w14d4-verify-report.png`: terminal output of `python scripts/verify_report.py` ending in "24 of 24 checks passed"
-- [ ] `w14d4-risk-report-sql.png`: terminal, `python scripts/run_sql.py sql/risk_report.sql`
-- [ ] `w14d4-running-balance-sql.png`: terminal, the running balance query for `ACC-1001` (the eight hand-verified rows)
-- [ ] `w14d4-view-risk-dashboard.png`: terminal, a query on `v_risk_dashboard`
-- [ ] `w14d4-s3-reports.png`: S3 console, reports bucket, `monthly/2026-09/`, showing the JSON and CSV files (a required screenshot in the brief)
-- [ ] `w14d4-report-csv.png`: the September CSV opened (terminal or spreadsheet)
-- [ ] `w14d4-eventbridge-rule.png`: EventBridge console, Rules, `fintrust-capstone-monthly-report`, showing the cron schedule and the Lambda target
-- [ ] `w14d4-lambda-functions.png`: Lambda console, the function list showing all five functions (retakes the Week 13 Day 5 screenshot)
+- [x] `w14d4-verify-report.png`: terminal output of `python scripts/verify_report.py` ending in "24 of 24 checks passed"
+- [x] `w14d4-risk-report-sql.png`: terminal, `python scripts/run_sql.py sql/risk_report.sql`
+- [x] `w14d4-running-balance-sql.png`: terminal, the running balance query for `ACC-1001` (the eight hand-verified rows)
+- [x] `w14d4-view-risk-dashboard.png`: terminal, a query on `v_risk_dashboard`
+- [x] `w14d4-s3-reports.png`: S3 console, reports bucket, `monthly/2026-09/`, showing the JSON and CSV files (a required screenshot in the brief)
+- [x] `w14d4-report-csv.png`: the September CSV opened (terminal or spreadsheet)
+- [x] `w14d4-eventbridge-rule.png`: EventBridge console, Rules, `fintrust-capstone-monthly-report`, showing the cron schedule and the Lambda target
+- [x] `w14d4-lambda-functions.png`: Lambda console, the function list showing all five functions (retakes the Week 13 Day 5 screenshot)
 
 ### Check against the brief and rubric
 
@@ -648,20 +645,21 @@ The brief describes a backend system. A web dashboard was confirmed as a welcome
 
 - `pytest`: 861 tests (684 unit, 177 integration). 860 pass locally; 1 is skipped locally (it needs the CI database's password login).
 - Coverage of `fintrust/`: 99% with the whole suite, 96% with unit tests alone. `query.py` is 100% covered.
-- The dashboard was driven in a real browser (Chromium) against the real handlers, a real PostgreSQL and a simulated AWS, under the same Content-Security-Policy that CloudFront applies: connect with a wrong and a right key, search, open a journey, resolve an alert, flag an account, upload a file and watch 12 transactions finish, including one in the dead-letter queue. No script or policy errors were reported, on desktop and phone widths.
-- The hosting script was run against a local AWS simulator, except the security headers policy, which the simulator does not support; that request and the distribution settings were checked against the AWS service definition instead. CloudFront serving the site, the headers, and CORS from a real browser are first proven on the real account by `verify_dashboard.py` and by using the dashboard.
+- `verify_dashboard.py` passed 23 of 23 checks on the real account: the bucket refuses direct access, CloudFront serves the page over HTTPS with the Content-Security-Policy, the API key is in no served file, and CORS answers the dashboard's address only.
+- Every dashboard action was used on the deployed site: connect, search, open a journey, resolve an alert, flag an account, and upload a file with live progress (screenshots below).
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w14d4-verify-dashboard.png`: terminal output of `python scripts/verify_dashboard.py` ending in "23 of 23 checks passed"
-- [ ] `w14d4-dashboard-overview.png`: the dashboard's Overview, with the CloudFront address visible in the browser's address bar
-- [ ] `w14d4-dashboard-transactions.png`: Transactions, filtered to High
-- [ ] `w14d4-dashboard-journey.png`: the journey panel for a transaction uploaded through the pipeline, showing the score breakdown and the steps
-- [ ] `w14d4-dashboard-alerts.png`: Alerts, with at least one open alert
-- [ ] `w14d4-dashboard-accounts.png`: Accounts
-- [ ] `w14d4-dashboard-upload.png`: Upload a file, after a file has finished, showing the progress table
-- [ ] `w14d4-cloudfront-distribution.png`: CloudFront console, the distribution, showing status Enabled and the S3 origin with origin access control
-- [ ] `w14d4-s3-dashboard-private.png`: S3 console, the dashboard bucket, Permissions tab, showing "Block all public access: On" and the bucket policy
+- [x] `w14d4-verify-dashboard.png`: terminal output of `python scripts/verify_dashboard.py` ending in "23 of 23 checks passed"
+- [x] `w14d4-dashboard-overview.png`: the dashboard's Overview, with the CloudFront address visible in the browser's address bar
+- [x] `w14d4-dashboard-transactions.png`: Transactions, filtered to High
+- [x] `w14d4-dashboard-journey.png`: the journey panel for a transaction uploaded through the pipeline, showing the score breakdown and the steps
+- [x] `w14d4-dashboard-alerts.png`: Alerts, with at least one open alert
+- [x] `w14d4-dashboard-resolve.png`: Alerts, after resolving an alert from the dashboard
+- [x] `w14d4-dashboard-accounts.png`: Accounts
+- [x] `w14d4-dashboard-upload.png`: Upload a file, after a file has finished, showing the progress table
+- [x] `w14d4-cloudfront-distribution.png`: CloudFront console, the distribution, showing status Enabled and the S3 origin with origin access control
+- [x] `w14d4-s3-dashboard-private.png`: S3 console, the dashboard bucket, Permissions tab, showing "Block all public access: On" and the bucket policy
 
 ### Check against the brief and rubric
 
@@ -674,7 +672,7 @@ The brief describes a backend system. A web dashboard was confirmed as a welcome
 | Rubric C1: security boundaries | Private bucket, origin access control, HTTPS only, CORS to one address |
 | Brief: API key authentication on every route | Unchanged; the browser preflight is the only request without a key, and it returns headers only |
 
-**Open items carried forward:** Week 14 Day 5: end-to-end script, dead-letter break-and-recover on the real account (now watchable on the dashboard), Well-Architected self-assessment, draw.io diagrams as PDF, final rubric audit, billing evidence, merge to `main`, make the repository public.
+**Open items carried forward:** Week 14 Day 5: end-to-end script, dead-letter break-and-recover on the real account (now watchable on the dashboard), Well-Architected self-assessment, draw.io diagrams as PDF, final rubric audit, billing evidence, merge to `main`.
 
 ---
 
@@ -711,30 +709,30 @@ The brief describes a backend system. A web dashboard was confirmed as a welcome
 
 - `pytest`: 889 tests (709 unit, 180 integration). 888 pass locally; 1 is skipped locally (it needs the CI database's password login).
 - Coverage of `fintrust/`: 99%.
-- `e2e_test.py` passed 30 of 30 checks in a local simulation with the real handlers, a real PostgreSQL and a simulated AWS (and 22 of 22 with `--skip-dlq`). In that simulation the queue redrive was stood in for by moving the messages by hand, because the simulator does not support it. **The redrive command itself, the three retries at 60-second intervals and the alarm are first proven on the real account by this phase's run.**
-- The nightly stop script was run against the simulator. The schedules calling the real RDS and EC2 APIs are first proven at 20:00 on the day they are deployed.
-- The draw.io files are well-formed, but were not opened in draw.io here. Open each once to confirm it displays correctly.
+- `e2e_test.py` passed 30 of 30 checks on the real account in 5 minutes 29 seconds, including the dead-letter stage: three failed attempts 60 seconds apart, the message in the dead-letter queue, other accounts unaffected, the account onboarded, the real redrive, and the transaction scored (`docs/evidence/w14d5-e2e-output.txt`).
+- The nightly stop schedules are deployed and stop the database and the tunnel instance at 20:00 SAST (`w14d5-nightly-stop.png`).
+- A test checks that the committed draw.io files and PDFs are well-formed and match the diagram description.
 
-### Evidence to capture (save in `docs/evidence/`)
+### Evidence (`docs/evidence/`)
 
-- [ ] `w14d5-e2e-output.txt`: the full output of the end-to-end test (`python scripts/e2e_test.py | tee docs/evidence/w14d5-e2e-output.txt`)
-- [ ] `w14d5-e2e-passed.png`: terminal, the end of that output showing "30 of 30 checks passed" and "END-TO-END TEST PASSED"
-- [ ] `w14d5-dlq-journey.png`: the dashboard's journey panel for the recovered transaction: three failed attempts, then scored
-- [ ] `w14d5-dlq-alarm-email.png`: the ALARM email for `fintrust-capstone-transactions-dlq-depth`
-- [ ] `w14d5-nightly-stop.png`: EventBridge console, Scheduler, Schedules, showing the two stop schedules
-- [ ] `w14d5-billing-summary.png`: Billing and Cost Management, Bills, the current month's total
-- [ ] `w14d5-billing-credits.png`: Billing and Cost Management, Credits, showing credits used and remaining
+- [x] `w14d5-e2e-output.txt`: the full output of the end-to-end test (`python scripts/e2e_test.py | tee docs/evidence/w14d5-e2e-output.txt`)
+- [x] `w14d5-e2e-passed.png`: terminal, the end of that output showing "30 of 30 checks passed" and "END-TO-END TEST PASSED"
+- [x] `w14d5-dlq-journey.png`: the dashboard's journey panel for the recovered transaction: three failed attempts, then scored
+- [x] `w14d5-dlq-alarm-email.png`: the ALARM email for `fintrust-capstone-transactions-dlq-depth`
+- [x] `w14d5-nightly-stop.png`: EventBridge console, Scheduler, Schedules, showing the two stop schedules
+- [x] `w14d5-billing-summary.png`: Billing and Cost Management, Bills, the current month's total
+- [x] `w14d5-billing-credits.png`: Billing and Cost Management, Credits, showing credits used and remaining
 - [ ] `w14d5-github-main.png`: the repository's `main` branch on GitHub with a green check
 
 ### Check against the brief and rubric
 
 | Requirement | Status |
 |---|---|
-| E2E test script validating the full ingestion-to-alert pipeline | Built; run on the real account in this phase |
+| E2E test script validating the full ingestion-to-alert pipeline | Met: 30 of 30 on the real account |
 | Well-Architected review self-assessment | Met |
 | Portfolio Check-In #14: final submission of all artefacts | Every artefact on the brief's checklist is mapped in `docs/rubric-audit.md` |
-| Rubric C1: DLQ behaviour tested; billing evidence | Proven by this phase's run and screenshots |
-| Rubric C4: end-to-end script run successfully against the real system | Proven by this phase's run |
+| Rubric C1: DLQ behaviour tested; billing evidence | Met (`w14d5-e2e-output.txt`, billing screenshots) |
+| Rubric C4: end-to-end script run successfully against the real system | Met (`w14d5-e2e-output.txt`) |
 | Rubric C6: architecture diagram, ERD, README, Conventional Commits | Met |
 
-**After this phase:** merge `develop` into `main`, make the repository public, submit the link. Then presentation preparation for Week 16 with `docs/demo-runbook.md`.
+**After this phase:** merge `develop` into `main`, share the repository with the facilitator, submit the link. Then presentation preparation for Week 16 with `docs/demo-runbook.md`.
