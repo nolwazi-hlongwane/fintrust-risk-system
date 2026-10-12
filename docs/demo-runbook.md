@@ -25,7 +25,7 @@ If anything fails, there is a day to fix it. Also check the alert emails are arr
 3. `python scripts/make_demo_file.py`. Note the file path and the two commands it prints.
 4. Copy the API key: `source ./scripts/api_env.sh && printf '%s' "$API_KEY" | pbcopy`
 5. Open these browser tabs and sign in to each:
-   - the dashboard (`aws ssm get-parameter --name /fintrust/dev/dashboard_url --query Parameter.Value --output text`), connected with the key
+   - the dashboard (`aws ssm get-parameter --name /fintrust/dev/dashboard_url --query Parameter.Value --output text`), connected with the key; the Overview charts load (if they show an error, the figures above them still work: carry on)
    - CloudWatch → Dashboards → `fintrust-capstone-operations`, time range 30 minutes, auto-refresh 10 seconds
    - S3 → the `fintrust-capstone-reports-...` bucket → `monthly/`
    - the email inbox
@@ -44,7 +44,8 @@ The nightly automatic stop runs at 20:00 and does not affect a daytime demo.
 | 2:00 | Click the row marked **Scored, alert sent** | "This is why it scored 70: plus 50 for an amount above R50 000, plus 20 for cross-border. And this is its journey, step by step, from DynamoDB. No score is a black box." |
 | 3:00 | Show the inbox | "The alert email. The account number is masked, and there is no customer name: email is not a secure channel." |
 | 3:30 | Switch to the CloudWatch dashboard | "Rows read equals rows queued plus rows quarantined: 12 = 10 + 2. One scoring failure so far. These are my custom metrics in the FinTrust/ETL namespace." |
-| 4:30 | Dashboard → **Alerts** → **Resolve** the new alert; then **Overview** | "The officer records who checked it and what they found. The update only succeeds once, even if two people click." |
+| 4:30 | Dashboard → **Alerts** → **Resolve** the new alert | "The officer records who checked it and what they found. The update only succeeds once, even if two people click." |
+| 5:00 | **Overview** (All time). Point at the last bar of the activity chart, then the alert chart. In **Fraud ranking**, select ACC-1007 | "This week's bar already includes the file I just uploaded, and the alert I resolved is in the alert chart. These numbers come from PostgreSQL, not the browser. ACC-1007 is marked 30-day burst: the same rolling-window rule as my risk report. This is its running balance, from the window function in monthly_summary.sql; the red dots are its high-risk transactions." |
 | 5:30 | Back to **Upload a file**: the retrying row now says **In the dead-letter queue**. Click it | "Three attempts, each with the reason: the account is not in the ledger. After the third, SQS moved the message to the dead-letter queue. It is not lost and it is not blocking any other account, because the queue orders per account." |
 | 6:30 | Terminal: `python scripts/onboard_account.py ACC-9…` then `./scripts/redrive_dlq.sh` | "I fix the cause, onboarding the account, then redrive the queue. Nothing is re-uploaded or retyped." |
 | 7:30 | Click the row again (or **Transactions**, search the account) | "Scored. The journey shows the whole story: three failures, then success." |

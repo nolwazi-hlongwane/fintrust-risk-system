@@ -47,7 +47,7 @@ Each rubric descriptor at the "Exceeds Expectations" level is broken into its pa
 
 | Exceeds descriptor | Status | Proof |
 |---|---|---|
-| Full pytest suite, unit and integration | Met: 889 tests, 99% coverage of `fintrust/` | `tests/`; `docs/testing.md`; `w14d3-pytest-local.png`, `w14d3-coverage.png` |
+| Full pytest suite, unit and integration | Met: 945 tests, 99% coverage of `fintrust/` (889 at submission; 56 added in Week 15 Day 1) | `tests/`; `docs/testing.md`; `w14d3-pytest-local.png`, `w14d3-coverage.png` |
 | moto `@mock_aws` fixtures via `conftest.py` | Met | `tests/conftest.py` |
 | GitHub Actions CI green on every push | Met | `.github/workflows/ci.yml`; `w14d3-ci-feature-branch.png`, `w14d3-ci-develop.png` |
 | Integration tests scoped to the develop branch only | Met, and checked by a test | `.github/workflows/ci.yml` |
@@ -81,7 +81,7 @@ The brief's artefact checklist, item by item:
 | Risk register | `docs/data-governance.md` section 5 |
 | `schema.sql`, `seed.sql`, `risk_report.sql`, `monthly_summary.sql`, `views.sql`, stored function | `sql/` |
 | Complete `fintrust/` package with all 10 modules | `fintrust/` |
-| `tests/` with `conftest.py` and at least 3 test files | `tests/` (32 test files) |
+| `tests/` with `conftest.py` and at least 3 test files | `tests/` (34 test files) |
 | `requirements.txt` with pinned versions | `requirements.txt` |
 | `.github/workflows/ci.yml` | `.github/workflows/ci.yml` |
 | `README.md` a non-technical person can follow | `README.md` |
@@ -124,7 +124,7 @@ Each of these was a deliberate decision. The reasons are in the document named.
 
 ## Beyond the brief
 
-Built in addition, without replacing anything required: the web dashboard on CloudFront; the transaction journey and explainable scores; `GET /alerts`, `GET /accounts`, `GET /health`; dead-letter queues for the ingest and alert Lambdas as well as the scoring queue; a permission boundary on every role; three least-privilege database users; alarms on every dead-letter queue; the automatic nightly stop of the database.
+Built in addition, without replacing anything required: the web dashboard on CloudFront, with charts drawn from the SQL analytics (Week 15 Day 1: `GET /insights/trends`, `GET /accounts/{account_id}/balance`); the transaction journey and explainable scores; `GET /alerts`, `GET /accounts`, `GET /health`; dead-letter queues for the ingest and alert Lambdas as well as the scoring queue; a permission boundary on every role; three least-privilege database users; alarms on every dead-letter queue; the automatic nightly stop of the database.
 
 ## Free Tier and cost
 

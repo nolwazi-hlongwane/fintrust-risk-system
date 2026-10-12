@@ -11,8 +11,8 @@ Every change is checked automatically before it can reach the `develop` or `main
 
 | Layer | What it runs against | When | Tests | What it proves |
 |---|---|---|---|---|
-| **Unit** (`tests/unit`) | moto (a simulated AWS, in memory) | Every push, any branch | 709 | Each module does its own job: validation rules, scoring rules, error handling, email content, API responses, IAM policies |
-| **Integration** (`tests/integration`) | moto and a real PostgreSQL 16 | `develop` branch only | 180 | The modules work together and the SQL is right: constraints, rollback, permissions per database user, and the whole pipeline end to end |
+| **Unit** (`tests/unit`) | moto (a simulated AWS, in memory) | Every push, any branch | 742 | Each module does its own job: validation rules, scoring rules, error handling, email content, API responses, IAM policies |
+| **Integration** (`tests/integration`) | moto and a real PostgreSQL 16 | `develop` branch only | 203 | The modules work together and the SQL is right: constraints, rollback, permissions per database user, and the whole pipeline end to end |
 | **Live verification** (`scripts/verify_*.py`, `scripts/e2e_test.py`) | The real AWS account | By hand, after each deployment | 8 scripts | The deployed system works: real IAM, real network, real email |
 
 Coverage of the application code (`fintrust/`) is 99% with all tests, 96% with unit tests alone.
@@ -58,7 +58,8 @@ A fixture is setup code that pytest runs for any test that asks for it by name.
 | `unit/test_failure_paths.py` | 9 | Failures at awkward moments, such as an audit write failing after the real work succeeded |
 | `unit/test_iam_policies.py` | 97 | No wildcard actions; every role limited to its own resources |
 | `unit/test_storage_config.py`, `test_monitoring_config.py` | 45 | Lifecycle rules match the retention policy; alarms and dashboard use real metric names; Free Tier limits |
-| `unit/test_frontend.py` | 23 | The dashboard's files: no key or mock data, no HTML built from data, strict Content-Security-Policy, private hosting |
+| `unit/test_frontend.py` | 31 | The dashboard's files: no key or mock data, no HTML built from data, strict Content-Security-Policy, private hosting, every file copied and uploaded, the Overview figures layout |
+| `unit/test_query_trends.py` | 25 | The chart routes: day, week and month bars (Monday weeks, month and year roll-over), validation, the 30-day burst flag, the balance's order, summary and limit |
 | `unit/test_demo_tools.py` | 25 | The demonstration file scores exactly as the end-to-end test expects; onboarding is safe; the diagrams match their source |
 | `unit/test_repo_hygiene.py` | 22 | No keys or passwords committed; dependencies pinned; clients at module level; scripts valid |
 | `integration/test_schema.py` | 46 | Every constraint, index and foreign key rejects bad data |
@@ -70,6 +71,7 @@ A fixture is setup code that pytest runs for any test that asks for it by name.
 | `integration/test_report_integration.py` | 9 | The report Lambda end to end on seed data: totals, balances chaining month to month, no customer details |
 | `integration/test_onboard_integration.py` | 3 | Onboarding an account against a real database |
 | `integration/test_pipeline.py` | 7 | The whole pipeline in one process, including the dead-letter queue |
+| `integration/test_trends_integration.py` | 23 | The chart data reconciled with `/insights`, with `risk_report.sql` account by account, with `monthly_summary.sql` and the hand-worked balances; a period keeps the balance carried in |
 
 ### The pipeline test and the dead-letter queue
 

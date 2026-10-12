@@ -38,6 +38,7 @@ The same diagram as a PDF: [docs/diagrams/architecture.pdf](docs/diagrams/archit
 | Week 14 Day 3 | Automated Testing | Done |
 | Week 14 Day 4 | SQL Analytics and Reporting Layer, and the web dashboard | Done |
 | Week 14 Day 5 | End-to-End Integration and Submission | Done |
+| Week 15 Day 1 | Corrections and dashboard analytics (charts) | Done |
 
 Progress and evidence for each phase are recorded in [docs/build-log.md](docs/build-log.md).
 
@@ -102,7 +103,7 @@ docker compose down
 
 Without a database those tests are skipped, not failed.
 
-There are 889 tests (709 unit, 180 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
+There are 945 tests (742 unit, 203 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
 
 ## Deploy to AWS
 
@@ -279,7 +280,7 @@ The database must be running. The first run takes 5 to 15 minutes while CloudFro
 
 ```bash
 ./infrastructure/frontend/deploy_frontend.sh             # private bucket, CloudFront, files, CORS, API redeploy
-python scripts/verify_dashboard.py                       # hosting, security headers and CORS checks
+python scripts/verify_dashboard.py                       # hosting, security headers, CORS and chart data checks
 ```
 
 The script prints the dashboard's address. To sign in, copy the API key without showing it on screen:

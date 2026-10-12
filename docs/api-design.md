@@ -1,7 +1,7 @@
 # API Design
 
 **Brief slot:** Week 13 Day 1: Design Kickoff (specification). Read routes built in Week 13 Day 5; `/alerts` and the write routes in Week 14 Day 1.
-**Status:** all nine routes are deployed (read routes in Week 13 Day 5; `/alerts`, `/upload`, `/flag` and `/resolve` in Week 14 Day 1; `/accounts` in Week 14 Day 4). The machine-readable definition is `infrastructure/apigateway/openapi.json` (OpenAPI 3), which is what API Gateway is built from.
+**Status:** all eleven routes are deployed (read routes in Week 13 Day 5; `/alerts`, `/upload`, `/flag` and `/resolve` in Week 14 Day 1; `/accounts` in Week 14 Day 4; `/insights/trends` and `/accounts/{account_id}/balance`, the data behind the dashboard charts, in Week 15 Day 1). The machine-readable definition is `infrastructure/apigateway/openapi.json` (OpenAPI 3), which is what API Gateway is built from.
 
 ## Overview
 
@@ -30,8 +30,10 @@ The key is never stored in the repository or in the dashboard's code. The dashbo
 | GET | `/transactions` | List transactions, filtered and paginated | 200 |
 | GET | `/transactions/{transaction_id}/journey` | Timeline and score breakdown for one transaction | 200 |
 | GET | `/insights` | Risk summary for the compliance team | 200 |
+| GET | `/insights/trends` | The series behind the dashboard charts | 200 |
 | GET | `/alerts` | List alerts | 200 |
 | GET | `/accounts` | List accounts ranked by risk | 200 |
+| GET | `/accounts/{account_id}/balance` | One account's running balance | 200 |
 | POST | `/upload` | Submit a CSV file for processing | 202 |
 | POST | `/flag` | Flag an account for review | 201 |
 | POST | `/resolve` | Mark an alert as resolved | 200 |
@@ -127,6 +129,81 @@ Optional `from` and `to` dates.
   ]
 }
 ```
+
+### GET /insights/trends
+
+*Week 15 Day 1.* The four series the dashboard draws as charts. Optional `from` and `to` dates, as for `/insights`. PostgreSQL does all the counting; the browser only draws the result, so every chart can be checked against SQL.
+
+| Part | What it is | How it is worked out |
+|---|---|---|
+| `granularity` | How wide each bar is: `day` (periods up to 62 days), `week` (up to two years, weeks start on Monday) or `month` | Chosen by the API from the length of the period |
+| `activity` | Transactions per bar, split Low, Medium and High, with their value. Empty bars are included so the time axis has no gaps | `date_trunc` on the South African calendar day |
+| `score_distribution` | How many transactions fall in each score range 0-9 ... 90-100, split by the level they were given, with the thresholds | Integer division of `risk_score` |
+| `alert_flow` | Alerts raised and resolved per bar, the number open now, and the median hours from raised to resolved | `percentile_cont(0.5)` |
+| `account_ranking` | The top 15 accounts by total risk points: `fraud_rank`, `fraud_percentile` and whether the account broke the 30-day burst rule | The same `PERCENT_RANK()` and rolling `RANGE BETWEEN INTERVAL '30 days'` window as `sql/risk_report.sql`, over all accounts before the top 15 are kept |
+
+```json
+{
+  "period": { "from": null, "to": null },
+  "span": { "first_day": "2026-07-01", "last_day": "2026-09-30" },
+  "granularity": "week",
+  "activity": [
+    { "period_start": "2026-06-29", "low": 17, "medium": 2, "high": 1, "transactions": 20, "total_value": "621909.15" }
+  ],
+  "score_distribution": {
+    "bucket_size": 10,
+    "thresholds": { "medium": 40, "high": 70 },
+    "buckets": [ { "from": 0, "to": 9, "low": 235, "medium": 0, "high": 0 } ]
+  },
+  "alert_flow": {
+    "periods": [ { "period_start": "2026-06-29", "raised": 1, "resolved": 1 } ],
+    "raised": 12, "resolved": 9, "open_now": 3, "median_hours_to_resolve": "26.0"
+  },
+  "account_ranking": {
+    "accounts_ranked": 12,
+    "burst_rule": "more than 3 high-risk transactions in any 30 days",
+    "items": [
+      { "account_id": "ACC-1005", "account_status": "ACTIVE", "transaction_count": 30, "high_risk_count": 4,
+        "total_risk_points": 580, "fraud_rank": 1, "fraud_percentile": "1.0000",
+        "peak_high_risk_in_30_days": 2, "burst_detected": false },
+      { "account_id": "ACC-1007", "account_status": "FLAGGED", "transaction_count": 31, "high_risk_count": 5,
+        "total_risk_points": 550, "fraud_rank": 2, "fraud_percentile": "0.9091",
+        "peak_high_risk_in_30_days": 5, "burst_detected": true }
+    ]
+  }
+}
+```
+
+(Arrays shortened.) An integration test checks that every account in `sql/risk_report.sql`'s output has the same rank, percentile and 30-day peak here, and that the activity series adds up to `/insights` exactly.
+
+### GET /accounts/{account_id}/balance
+
+*Week 15 Day 1.* One account's running balance, one point per transaction, oldest first. Optional `from` and `to` dates.
+
+The balance comes from the project's own `sql/monthly_summary.sql` (`SUM(...) OVER (PARTITION BY account_id ORDER BY tx_date, transaction_id ROWS UNBOUNDED PRECEDING)`), packaged with the Lambda, so the chart, the monthly report and the SQL artefact use one query. The account and date filters are applied **outside** the window function: each balance is worked out from the account's whole history first, so a chosen period starts from the true balance instead of zero. PostgreSQL still reads only that account's rows (the account filter matches the window's `PARTITION BY`, so it is applied before the window, through the `account_id` index).
+
+At most the latest 1,000 points are returned; `truncated` says when there were more.
+
+```json
+{
+  "account_id": "ACC-1007",
+  "account_status": "FLAGGED",
+  "period": { "from": "2026-09-01", "to": "2026-09-30" },
+  "points": [
+    { "transaction_id": "TXN-20260902-000180", "tx_date": "2026-09-02 13:29:00+00:00", "tx_type": "DEBIT",
+      "amount": "81900.00", "signed_amount": "-81900.00", "running_balance": "423779.20",
+      "risk_level": "HIGH", "risk_score": 70 }
+  ],
+  "truncated": false,
+  "summary": {
+    "opening_balance": "505679.20", "closing_balance": "388419.28",
+    "lowest_balance": "388419.28", "highest_balance": "610279.20",
+    "credits": "186500.00", "debits": "303759.92", "high_risk_transactions": 3
+  }
+}
+```
+
+`opening_balance` is the balance carried in from before the period: opening + credits − debits = closing. An unknown account is `404`; a malformed id is `400`.
 
 ### GET /alerts
 

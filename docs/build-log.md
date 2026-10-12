@@ -736,3 +736,64 @@ The brief describes a backend system. A web dashboard was confirmed as a welcome
 | Rubric C6: architecture diagram, ERD, README, Conventional Commits | Met |
 
 **After this phase:** merge `develop` into `main`, share the repository with the facilitator, submit the link. Then presentation preparation for Week 16 with `docs/demo-runbook.md`.
+
+## Week 15 Day 1: Corrections and Dashboard Analytics
+
+**Built on:** Monday 12 October 2026 (brief slot: Week 15 Day 1, presentation preparation between the build weeks and the Week 16 presentation)
+**Branch:** `feature/w15d1-dashboard-analytics`
+
+Nothing required by the brief was missing (see `docs/rubric-audit.md`). This phase corrects what review found, and adds charts to the dashboard as advised, without adding services or scope: every chart is a view of SQL the system already has.
+
+### Corrections
+
+| Found | Correction |
+|---|---|
+| On the Overview, the Total value (for example R 6 038 764,84) ran into the Active accounts figure | Six-column grid; the money figure takes two columns, or a row of its own on smaller screens; the value never wraps and scales with the screen. Guarded by tests in `tests/unit/test_frontend.py` |
+| "Active accounts" counted every account with transactions, including flagged ones | Renamed "Accounts with transactions" |
+| Medium (`#9a5f0c`) and High (`#b42318`) were almost the same colour for a colour-blind reader (OKLab ΔE 3.3, deuteranopia) | New fill colours for charts, worst pair ΔE 8.0; text colours unchanged. Legends and tables as well, so colour is never the only signal |
+
+### What was built
+
+| Item | Where |
+|---|---|
+| `GET /insights/trends`: activity per day/week/month, score distribution, alert flow with median time to resolve, account ranking with `PERCENT_RANK` and the 30-day burst rule | `fintrust/query.py` |
+| `GET /accounts/{account_id}/balance`: the running balance, by running `sql/monthly_summary.sql` itself | `fintrust/query.py`, `fintrust/db.py` (`read_sql_file`, shared with the report Lambda) |
+| Both routes in API Gateway | `infrastructure/apigateway/openapi.json` |
+| The SQL files packaged with the query Lambda as well as the report Lambda | `infrastructure/lambda/deploy_function.sh` |
+| Six charts, linked to each other and to the journey drawer; quick periods; zoom by selecting a bar; a table of the numbers under every chart | `frontend/charts.js` (drawing only), `frontend/app.js` (data), `frontend/styles.css` |
+| Live checks for the chart data, reconciled with `GET /insights` | `scripts/verify_dashboard.py` |
+
+### Key decisions
+
+1. **The database does the counting, the browser only draws.** Every chart value comes from PostgreSQL, so a chart can be checked with the same SQL an analyst would run. It also keeps the system backend-heavy, as the brief intends.
+2. **One source of truth for the analytics.** The balance chart runs `sql/monthly_summary.sql` as it is, the same file the monthly report runs. The ranking uses the same `PERCENT_RANK` and rolling 30-day window as `sql/risk_report.sql`, and a test proves they agree account by account.
+3. **Filter after the window function.** The balance is worked out over the account's whole history, then rows outside the period are dropped; otherwise a period would restart the balance at zero. `EXPLAIN` confirms PostgreSQL still reads only the one account through `idx_transactions_account_id`, because the account filter matches the window's `PARTITION BY`.
+4. **Two new routes, not a bigger `/insights`.** The figures and the charts load in parallel and fail independently: if the chart query fails, the figures still show.
+5. **No chart library.** SVG drawn by our own code, so the Content-Security-Policy still allows only the site's own script, and nothing third-party needs patching.
+6. **No new AWS service and no new IAM permission.** The query Lambda's database user already had `SELECT` on the tables it reads; API Gateway gains two routes on the same Lambda.
+
+### Test results
+
+- `pytest`: 945 tests (742 unit, 203 integration), all passing against PostgreSQL 16. 56 are new: `tests/unit/test_query_trends.py`, `tests/integration/test_trends_integration.py` and new checks in `tests/unit/test_frontend.py`.
+- Coverage of `fintrust/`: 99.86% (unit tests alone 95.93%, CI threshold 90%); `query.py` 100%.
+- `ruff check .` clean; every shell script passes `bash -n`.
+- The dashboard was run in Chromium against the real query Lambda and a seeded PostgreSQL at 1440, 1100 and 390 pixels wide, under the production Content-Security-Policy: no console errors, no figure overflow, no sideways scrolling on a phone.
+
+### Evidence (`docs/evidence/`)
+
+- [ ] `w15d1-overview-figures.png`: the Overview figures on the live dashboard, Total value fitting its box
+- [ ] `w15d1-overview-charts.png`: the full Overview with all six charts
+- [ ] `w15d1-ranking-balance.png`: ACC-1007 selected in the ranking (30-day burst) with its running balance
+- [ ] `w15d1-chart-journey.png`: a point on the balance selected, with the journey drawer open
+- [ ] `w15d1-verify-dashboard.png`: terminal, `python scripts/verify_dashboard.py`, ending with every check passed
+- [ ] `w15d1-api-gateway-routes.png`: API Gateway console, Resources, showing `/insights/trends` and `/accounts/{account_id}/balance`
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Brief, Week 16 live demo: upload → ETL → store → score → dashboard → alert | Strengthened: after an upload, the Activity chart, ranking and alert chart all move |
+| Rubric C2: CTE report, window function, view, function | The window function and `PERCENT_RANK` are now visible on screen, not only in files |
+| Rubric C4: tests | 56 new tests; coverage unchanged at 99% |
+| Rubric C6: API design document | `docs/api-design.md` documents both new routes |
+| Free Tier | No new service. Two more API calls each time the Overview opens |
