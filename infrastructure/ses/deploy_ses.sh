@@ -8,7 +8,8 @@
 # Tier. Moving out of the sandbox for production needs a request to AWS.
 #
 # This script asks SES to email a verification link to the address stored in
-# SSM (/fintrust/dev/alert_sender and alert_recipient). YOU must click the link.
+# SSM (/fintrust/dev/alert_sender and alert_recipient). The link must be clicked once
+# before SES will send anything.
 #
 # Safe to run more than once: run it again to check the status.
 # Usage:  ./infrastructure/ses/deploy_ses.sh
