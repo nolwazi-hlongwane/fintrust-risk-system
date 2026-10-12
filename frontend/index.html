@@ -4,44 +4,79 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
+  <meta name="color-scheme" content="light dark">
   <title>FinTrust risk desk</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
+  <!-- Applies the light or dark appearance before the page is drawn. -->
+  <script src="theme.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#page">Skip to the content</a>
+
   <header class="masthead">
     <div class="masthead-inner">
-      <p class="brand">FinTrust <span class="brand-desk">risk desk</span></p>
-      <div class="session" id="session" hidden>
-        <span class="session-dot" aria-hidden="true"></span>
-        <span id="session-text">Connected</span>
-        <button type="button" class="link-button on-dark" id="disconnect">Disconnect</button>
+      <p class="brand"><img class="brand-mark" src="favicon.svg" alt="">FinTrust <span class="brand-desk">risk desk</span></p>
+      <div class="masthead-tools">
+        <button type="button" class="icon-button on-dark" id="theme-toggle" aria-label="Switch to dark appearance"></button>
+        <div class="user" id="user" hidden>
+          <button type="button" class="user-button" id="user-button" aria-haspopup="true" aria-expanded="false" aria-controls="user-menu">
+            <span class="avatar" id="user-initials" aria-hidden="true"></span>
+            <span class="user-name" id="user-name"></span>
+            <span class="caret" aria-hidden="true"></span>
+          </button>
+          <div class="user-menu" id="user-menu" hidden>
+            <div class="user-menu-head">
+              <p class="user-menu-name" id="user-menu-name"></p>
+              <p class="user-menu-username" id="user-menu-username"></p>
+              <p id="user-menu-role"></p>
+            </div>
+            <fieldset class="appearance">
+              <legend>Appearance</legend>
+              <div class="segmented" id="appearance">
+                <label><input type="radio" name="appearance" value="system"><span>System</span></label>
+                <label><input type="radio" name="appearance" value="light"><span>Light</span></label>
+                <label><input type="radio" name="appearance" value="dark"><span>Dark</span></label>
+              </div>
+            </fieldset>
+            <p class="user-menu-note" id="user-menu-session"></p>
+            <button type="button" class="button wide" id="sign-out">Sign out</button>
+          </div>
+        </div>
       </div>
     </div>
   </header>
 
-  <!-- Shown until an API key has been accepted. -->
-  <main class="connect" id="connect-view">
-    <form class="connect-card" id="connect-form" autocomplete="off">
-      <h1>Connect to the risk API</h1>
-      <p class="lede">Enter the key issued to the compliance team. It is kept for this browser tab only and is cleared when the tab closes.</p>
-      <label for="api-url">API address</label>
-      <input id="api-url" name="api-url" type="url" required spellcheck="false" placeholder="https://…execute-api.eu-north-1.amazonaws.com/dev">
-      <label for="api-key">API key</label>
-      <input id="api-key" name="api-key" type="password" required spellcheck="false" autocomplete="off">
-      <p class="form-error" id="connect-error" role="alert" hidden></p>
-      <button type="submit" class="button primary" id="connect-button">Connect</button>
-    </form>
+  <!-- Shown until a person has signed in. -->
+  <main class="signin" id="signin-view" hidden>
+    <section class="signin-story" aria-labelledby="signin-story-title">
+      <p class="eyebrow">FinTrust Bank SA · Compliance</p>
+      <h1 id="signin-story-title">Transaction insights and risk monitoring</h1>
+      <p class="signin-lede">Every transaction checked, scored and explained, with alerts for the ones that need a person's attention.</p>
+      <ul class="assurances">
+        <li><span class="assurance-icon" aria-hidden="true">1</span><div><strong>Two-step sign-in</strong>Your password and a 6-digit code from your authenticator app.</div></li>
+        <li><span class="assurance-icon" aria-hidden="true">2</span><div><strong>Signed out when idle</strong>A session ends after 15 minutes without activity, and when you sign out it ends everywhere at once.</div></li>
+        <li><span class="assurance-icon" aria-hidden="true">3</span><div><strong>Every decision on record</strong>Resolving an alert or flagging an account is recorded under your name.</div></li>
+      </ul>
+    </section>
+    <section class="signin-card" aria-labelledby="signin-title">
+      <h2 id="signin-title">Sign in</h2>
+      <p class="lede">Use the FinTrust account issued to you by your administrator.</p>
+      <p class="notice" id="signin-notice" role="status" hidden></p>
+      <button type="button" class="button primary wide large" id="sign-in">Sign in to the risk desk</button>
+      <p class="signin-status" id="system-status" aria-live="polite"></p>
+      <p class="fine-print">For authorised FinTrust staff only. Activity is recorded for audit, in line with POPIA.</p>
+    </section>
   </main>
 
   <div id="app-view" hidden>
     <nav class="tabs" aria-label="Sections">
-      <div class="tabs-inner" role="tablist">
-        <button type="button" role="tab" class="tab" data-view="overview" aria-selected="true">Overview</button>
-        <button type="button" role="tab" class="tab" data-view="transactions" aria-selected="false">Transactions</button>
-        <button type="button" role="tab" class="tab" data-view="alerts" aria-selected="false">Alerts <span class="count" id="alert-count" hidden></span></button>
-        <button type="button" role="tab" class="tab" data-view="accounts" aria-selected="false">Accounts</button>
-        <button type="button" role="tab" class="tab" data-view="upload" aria-selected="false">Upload a file</button>
+      <div class="tabs-inner">
+        <a class="tab" href="#/overview" data-view="overview">Overview</a>
+        <a class="tab" href="#/transactions" data-view="transactions">Transactions</a>
+        <a class="tab" href="#/alerts" data-view="alerts">Alerts <span class="count" id="alert-count" hidden></span></a>
+        <a class="tab" href="#/accounts" data-view="accounts">Accounts</a>
+        <a class="tab" href="#/upload" data-view="upload">Upload a file</a>
       </div>
     </nav>
 
@@ -71,12 +106,25 @@
     </form>
   </dialog>
 
+  <!-- Shown a minute before an idle session is ended. -->
+  <dialog class="dialog" id="idle-dialog" aria-labelledby="idle-title" aria-describedby="idle-text">
+    <h2 id="idle-title">Are you still there?</h2>
+    <p class="lede" id="idle-text"></p>
+    <div class="dialog-actions">
+      <button type="button" class="button" id="idle-sign-out">Sign out now</button>
+      <button type="button" class="button primary" id="idle-stay">Stay signed in</button>
+    </div>
+  </dialog>
+
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <!-- Read out when a table is sorted or filtered. -->
+  <div class="visually-hidden" id="announcer" aria-live="polite"></div>
 
   <!-- One tooltip shared by every chart. Read out as the keyboard moves along a chart. -->
   <div class="chart-tip" id="chart-tip" role="status" aria-live="polite" hidden></div>
 
   <script src="config.js"></script>
+  <script src="auth.js"></script>
   <script src="charts.js"></script>
   <script src="app.js"></script>
 </body>
