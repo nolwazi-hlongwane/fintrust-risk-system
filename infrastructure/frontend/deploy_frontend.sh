@@ -10,12 +10,16 @@
 #      policy accepts requests from this one distribution only.
 #   3. A response headers policy adds security headers to every file, including a
 #      Content-Security-Policy: the page may run only its own script and may
-#      call only this project's API.
+#      call only this project's API and its Cognito sign-in domain.
 #   4. The API is then told to accept browser requests from the dashboard's
 #      address and nowhere else (CORS), and the API Lambda and API are redeployed
 #      to pick that up.
 #
-# The dashboard files hold no secret. The API key is typed in by the user.
+# The dashboard files hold no secret. config.js names the API, the dashboard's
+# own API key (it identifies the application for the usage plan; on its own it
+# opens nothing, because every route except /health also needs a signed-in
+# person) and the Cognito sign-in address and app client id, which are public
+# by design in the OAuth 2.0 authorization code flow with PKCE.
 # The bucket uses S3's own encryption (SSE-S3), not the project KMS key: these
 # are public web pages, and CloudFront would otherwise need rights on the key.
 #
@@ -43,6 +47,29 @@ if [[ -z "$API_URL" ]]; then
 fi
 API_ORIGIN="$(echo "$API_URL" | cut -d/ -f1-3)"       # https://<id>.execute-api.<region>.amazonaws.com
 
+# Sign-in (Week 15 Day 2). On the very first deployment the dashboard's address
+# does not exist yet, and sign-in needs it, so sign-in is set up after this
+# script has run once (deploy_auth.sh), and then this script is run again.
+SIGN_IN_URL="$(aws ssm get-parameter --name "/fintrust/${FINTRUST_ENV}/cognito_domain" \
+    --query Parameter.Value --output text 2>/dev/null || true)"
+CLIENT_ID="$(aws ssm get-parameter --name "/fintrust/${FINTRUST_ENV}/cognito_client_id" \
+    --query Parameter.Value --output text 2>/dev/null || true)"
+DASHBOARD_KEY=""
+if [[ -n "$SIGN_IN_URL" ]]; then
+  DASHBOARD_KEY_ID="$(aws apigateway get-api-keys --name-query "${PREFIX}-dashboard-key" \
+      --query 'items[0].id' --output text | none_to_empty)"
+  if [[ -z "$DASHBOARD_KEY_ID" ]]; then
+    echo "ERROR: the dashboard's API key does not exist yet. Run ./infrastructure/apigateway/deploy_api.sh first." >&2
+    exit 1
+  fi
+  DASHBOARD_KEY="$(aws apigateway get-api-key --api-key "$DASHBOARD_KEY_ID" --include-value \
+      --query value --output text)"
+  CONNECT_SRC="${API_ORIGIN} ${SIGN_IN_URL}"
+else
+  echo "Sign-in is not set up yet: after this run, run ./infrastructure/cognito/deploy_auth.sh and then this script again."
+  CONNECT_SRC="${API_ORIGIN}"
+fi
+
 # ---------- 1. private bucket ----------
 if ! aws s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
   aws s3api create-bucket --bucket "$BUCKET" \
@@ -69,7 +96,7 @@ if [[ -z "$OAC_ID" ]]; then
 fi
 
 # ---------- 3. security headers ----------
-render "$HERE/security-headers.json" | sed "s|__API_ORIGIN__|${API_ORIGIN}|g" > "$WORK/security-headers.json"
+render "$HERE/security-headers.json" | sed "s|__CONNECT_SRC__|${CONNECT_SRC}|g" > "$WORK/security-headers.json"
 HEADERS_ID="$(aws cloudfront list-response-headers-policies --type custom \
     --query "ResponseHeadersPolicyList.Items[?ResponseHeadersPolicy.ResponseHeadersPolicyConfig.Name=='${HEADERS_NAME}'].ResponseHeadersPolicy.Id | [0]" \
     --output text | none_to_empty)"
@@ -108,13 +135,19 @@ aws s3api put-bucket-policy --bucket "$BUCKET" --policy "file://$WORK/bucket-pol
 echo "Bucket policy: readable by distribution $DISTRIBUTION_ID only"
 
 # ---------- 6. upload the files ----------
-# config.js is written here with the real API address, so nothing is hard-coded
-# in the repository. It contains no secret.
-cp "$ROOT/frontend/index.html" "$ROOT/frontend/styles.css" "$ROOT/frontend/charts.js" "$ROOT/frontend/app.js" \
-   "$ROOT/frontend/favicon.svg" "$WORK/"
+# config.js is written here with the real addresses, so nothing account-specific
+# is in the repository.
+cp "$ROOT/frontend/index.html" "$ROOT/frontend/styles.css" "$ROOT/frontend/theme.js" "$ROOT/frontend/auth.js" \
+   "$ROOT/frontend/charts.js" "$ROOT/frontend/app.js" "$ROOT/frontend/favicon.svg" "$WORK/"
 cat > "$WORK/config.js" <<CONFIG
-// Written by infrastructure/frontend/deploy_frontend.sh. Holds no secret.
-window.FINTRUST_CONFIG = { apiUrl: "${API_URL}" };
+// Written by infrastructure/frontend/deploy_frontend.sh.
+// None of these is a secret: the API key identifies this application for the
+// usage plan, and every route except /health also needs a signed-in person.
+window.FINTRUST_CONFIG = {
+  apiUrl: "${API_URL}",
+  apiKey: "${DASHBOARD_KEY}",
+  signIn: { domain: "${SIGN_IN_URL}", clientId: "${CLIENT_ID}" }
+};
 CONFIG
 upload() {   # upload <file> <content type>
   aws s3 cp "$WORK/$1" "s3://${BUCKET}/$1" --content-type "$2" \
@@ -123,6 +156,8 @@ upload() {   # upload <file> <content type>
 }
 upload index.html "text/html; charset=utf-8"
 upload styles.css "text/css; charset=utf-8"
+upload theme.js   "application/javascript; charset=utf-8"
+upload auth.js    "application/javascript; charset=utf-8"
 upload charts.js  "application/javascript; charset=utf-8"
 upload app.js     "application/javascript; charset=utf-8"
 upload config.js  "application/javascript; charset=utf-8"
@@ -150,5 +185,4 @@ fi
 
 echo
 echo "Dashboard ready:  $DASHBOARD_URL"
-echo "Sign in with the API key. To copy it to the clipboard without showing it:"
-echo "    source ./scripts/api_env.sh && printf '%s' \"\$API_KEY\" | pbcopy"
+echo "Sign in with your FinTrust username, password and the 6-digit code from your authenticator app."
