@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Open a private tunnel from this computer to the RDS database.
 #
-#   your Mac :15432  ->  EC2 Instance Connect Endpoint  ->  tunnel instance  ->  RDS :5432
+#   laptop :15432  ->  EC2 Instance Connect Endpoint  ->  tunnel instance  ->  RDS :5432
 #
 # Leave this running in its own terminal window. While it is open, the database
 # answers on localhost port 15432. Press Ctrl+C to close it.

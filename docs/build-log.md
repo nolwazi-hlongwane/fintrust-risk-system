@@ -722,7 +722,7 @@ The brief describes a backend system. A web dashboard was confirmed as a welcome
 - [x] `w14d5-nightly-stop.png`: EventBridge console, Scheduler, Schedules, showing the two stop schedules
 - [x] `w14d5-billing-summary.png`: Billing and Cost Management, Bills, the current month's total
 - [x] `w14d5-billing-credits.png`: Billing and Cost Management, Credits, showing credits used and remaining
-- [ ] `w14d5-github-main.png`: the repository's `main` branch on GitHub with a green check
+- [x] `w14d5-github-main.png`: the repository's `main` branch on GitHub with a green check
 
 ### Check against the brief and rubric
 

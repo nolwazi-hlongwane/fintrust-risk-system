@@ -77,7 +77,7 @@ Three consequences, each a deliberate decision:
 | **S3** | Four data buckets: raw, processed, quarantine, reports. One more for the dashboard files. | 5 GB |
 | **Lambda** | Exactly five functions: ingest, score, alert, query, report. Python 3.13. | 1M requests |
 | **SQS FIFO + DLQ** | Ordered per-account queue between ingest and score; FIFO DLQ after 3 failures. A second, standard DLQ catches failed ingest invocations. | 1M requests |
-| **RDS PostgreSQL** | Transaction ledger, system of record. db.t3.micro, single-AZ, private subnets, no public endpoint, stopped outside working hours. | Uses credits on your plan |
+| **RDS PostgreSQL** | Transaction ledger, system of record. db.t3.micro, single-AZ, private subnets, no public endpoint, stopped outside working hours. | Uses credits on this account's plan |
 | **DynamoDB** | Event store: risk scores, rule breakdown, and the per-transaction journey. Partition key `account_id`, sort key starts with `tx_timestamp`. | 25 GB |
 | **API Gateway (REST)** | Entry point with API key and usage plan. REST type is required because HTTP APIs do not support API keys. | 1M calls |
 | **SES** | High-risk alert emails. Sandbox, verified address. | 3,000 messages |
@@ -179,20 +179,20 @@ Each phase is labelled with its brief slot. Real dates are compressed into four 
 
 `score.py` is built on Day 5 with the read API because nothing reaches RDS until it exists. Tests are written with each module, not left to Week 14 Day 3; that day completes coverage and the integration job.
 
-After every phase: run the tests, check against the brief and rubric, record the result in `docs/build-log.md`, and stop for review.
+After every phase: run the tests, check against the brief and rubric, record the result in `docs/build-log.md`, then merge the feature branch into `develop`.
 
 ## 8. Manual steps in the AWS console and GitHub
 
 | When | Task |
 |---|---|
 | Now | As root: Account page → activate "IAM user and role access to Billing information". Billing preferences → Alert preferences → Edit → tick "CloudWatch billing alerts". |
-| Now | Sign out of root. Do all building as your IAM user. Root is for billing settings only. |
-| Now | `aws configure` for your IAM user with region `eu-north-1`; confirm with `aws sts get-caller-identity`. |
+| Now | Sign out of root. Do all building as the IAM user. Root is for billing settings only. |
+| Now | `aws configure` for the IAM user with region `eu-north-1`; confirm with `aws sts get-caller-identity`. |
 | Now | Create an empty GitHub repository `fintrust-risk-system`. |
 | Day 1 | Run the IAM, SSM and billing alarm scripts; confirm the SNS email. |
-| Week 14 Day 1 | Click the SES verification link emailed to your Gmail. |
-| Each phase | Run the deploy script provided, take the evidence screenshots listed, commit with the messages provided. |
-| Daily | Stop RDS when you finish (`scripts/rds_stop.sh`). AWS restarts a stopped instance after 7 days. |
+| Week 14 Day 1 | Click the SES verification link sent to the alert address. |
+| Each phase | Run the phase's deploy and verify scripts, capture the evidence screenshots listed in the build log, commit with Conventional Commit messages. |
+| Daily | Stop RDS at the end of each working session (`scripts/rds_stop.sh`). AWS restarts a stopped instance after 7 days. |
 | Final | Export the draw.io diagrams to PDF. |
 
 The billing console shows "Global" because billing is not tied to a region. All project resources are created in **Europe (Stockholm), eu-north-1**. The billing alarm alone lives in us-east-1, because that is the only region where AWS publishes billing metrics.
@@ -209,7 +209,7 @@ Distinction is 85 or more, which means the Exceeds level on most criteria. The g
 | C4 (10) | moto fixtures in `conftest.py`, CI green on **every** push, integration scoped to `develop`, E2E run against the real system |
 | C5 (10) | All five governance elements, each specific to this system |
 | C6 (10) | Every checklist artefact, non-technical README, **Conventional Commits** with incremental history |
-| C7 (10) | Demo end to end without failure; every answer names parts of your own architecture |
+| C7 (10) | Demo end to end without failure; every answer names parts of the FinTrust architecture |
 | C8 (10) | Technical choices tied to risk reduction, cost containment and compliance posture |
 
 ## 10. Risks and open decisions
@@ -219,7 +219,7 @@ Distinction is 85 or more, which means the Exceeds level on most criteria. The g
 | 1 | Four real days for ten brief days | Tests written with each module; nothing optional is started until the checklist is complete. |
 | 2 | A service may be restricted on the credits-only Free plan | We find out on the day each service is first created; if blocked we stop and decide together. |
 | 3 | Git history will show four days, not two weeks | Accepted. Commit dates stay real; commits are small and meaningful. |
-| 4 | RDS is private, so SQL cannot be run from your Mac directly | **Decision for Day 2:** a small private EC2 instance reached through EC2 Instance Connect Endpoint, with no public IP and no open inbound port, used as an SSH tunnel for `psql`. Stopped when not in use. |
+| 4 | RDS is private, so SQL cannot be run from a laptop directly | **Decision for Day 2:** a small private EC2 instance reached through EC2 Instance Connect Endpoint, with no public IP and no open inbound port, used as an SSH tunnel for `psql`. Stopped when not in use. |
 | 5 | "Survive a simulated AZ failure" on single-AZ RDS | Subnets span two AZs; the single-AZ limit and the Multi-AZ production design are documented. |
 | 6 | Credit use (RDS, KMS key, EC2 tunnel instance) | Billing alarm at $11; RDS and EC2 stopped outside working hours. |
 | 7 | Live demo depends on RDS being started | Demo runbook with a start-up checklist 30 minutes before. |

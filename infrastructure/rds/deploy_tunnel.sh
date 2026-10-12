@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Week 13 Day 2: a private way for YOU to reach the private database.
+# Week 13 Day 2: a private way for the administrator to reach the private database.
 #
-# The database has no public endpoint, so psql on your Mac cannot reach it
+# The database has no public endpoint, so psql on a laptop cannot reach it
 # directly. This creates:
 #   1. An EC2 Instance Connect Endpoint (free): lets you open an SSH connection
 #      into the private subnet, authorised by your IAM identity.
