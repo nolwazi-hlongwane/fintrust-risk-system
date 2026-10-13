@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
+from api_auth import headers_for, sign_in
 from botocore.exceptions import ClientError
 
 try:
@@ -63,13 +64,13 @@ def api_settings():
     url = session.client("ssm").get_parameter(Name="/fintrust/dev/api_url")["Parameter"]["Value"]
     key_id = apigateway.get_api_keys(nameQuery=f"{PREFIX}-compliance-key")["items"][0]["id"]
     key = apigateway.get_api_key(apiKey=key_id, includeValue=True)["value"]
-    return url, key
+    return url, sign_in(session, url, key)        # signed in as the automation user (Week 15 Day 2)
 
 
 def call(url, path, params=None, key=None):
     """GET a route. Returns (status, body as dict, or None if the body is not JSON)."""
     full = f"{url}{path}" + (("?" + urllib.parse.urlencode(params)) if params else "")
-    request = urllib.request.Request(full, headers={"x-api-key": key} if key else {})
+    request = urllib.request.Request(full, headers=headers_for(key))
     try:
         with urllib.request.urlopen(request, timeout=30, context=TLS) as response:
             status, text = response.status, response.read().decode("utf-8")

@@ -21,6 +21,7 @@ A transaction linked to an account identifies the account holder, so the ledger 
 | **Cold** | S3 Glacier | Until 7 years from creation, then deleted (FSCA record-keeping) | S3 Lifecycle rule |
 | Quarantined rows | S3 quarantine bucket | 90 days | S3 Lifecycle rule |
 | Scores and journey events | DynamoDB | 12 months | Time-to-live attribute |
+| Staff sign-in sessions | DynamoDB | 90 days | Time-to-live attribute |
 | Logs | CloudWatch Logs | 30 days | Log group retention |
 
 Versioning on every bucket protects records from overwrite or deletion during their retention period.
@@ -29,7 +30,8 @@ Versioning on every bucket protects records from overwrite or deletion during th
 
 | Who or what | Access | Control |
 |---|---|---|
-| Compliance staff | Read transactions, alerts and accounts; resolve alerts; flag accounts; upload files | API key and usage plan on every route; HTTPS only; dashboard reachable only through CloudFront |
+| Compliance officers | Read transactions, alerts and accounts; upload files; resolve alerts; flag accounts | Own Cognito account with MFA; session ends after 15 idle minutes; decisions recorded under their username; HTTPS only |
+| Compliance analysts | Read and upload only | As above; the API refuses resolve and flag for this role |
 | Each Lambda function | Only the actions and resources its job needs | One least-privilege IAM role each, under a permission boundary; no wildcard actions |
 | Each Lambda inside the database | score: insert only. query: read, resolve alerts, flag through one function. report: read only, and not the `customers` table | Three PostgreSQL users with IAM database authentication; no password exists |
 | The internet | No access to the database | Private subnets, no internet gateway, no public endpoint |

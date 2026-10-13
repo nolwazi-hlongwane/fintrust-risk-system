@@ -1,20 +1,27 @@
-"""Build the architecture diagram and the ERD from one description each.
+"""Build every diagram in docs/diagrams from one description each.
 
-    python scripts/build_diagrams.py
+    python scripts/build_diagrams.py                                  # write the .drawio files
+    python scripts/export_diagrams.py --webapp <draw.io web app>      # draw them as .svg and .pdf
 
-Writes, in docs/diagrams/:
-    architecture.drawio   open and edit at https://app.diagrams.net (draw.io)
-    architecture.svg      the same diagram as a picture
-    erd.drawio
-    erd.svg
+Writes four editable draw.io files in docs/diagrams/:
 
-Both formats are produced from the same list of boxes and arrows below, so the
-editable diagram and the picture cannot drift apart. The ERD is read from
-docs/erd.md, which a test compares with the deployed database schema, so the
-diagram always matches the schema.
+    architecture.drawio          AWS architecture: every service, the network and
+                                 security boundaries, and the numbered data flows
+    erd.drawio                   the ledger's entity relationship diagram in UML
+                                 class notation, plus the DynamoDB key design
+    pipeline-sequence.drawio     UML sequence: one transaction from upload to
+                                 alert, and how a failed scoring is recovered
+    sign-in-sequence.drawio      UML sequence: sign-in, the session, sign-out
 
-architecture.pdf and erd.pdf are the same diagrams saved as PDF. To export them
-again after editing in draw.io: File > Export as > PDF.
+Each .drawio opens and can be edited at https://app.diagrams.net. The pictures
+(.svg for GitHub, .pdf as the deliverable) are exported from these files by
+draw.io itself, with the official AWS Architecture Icons, so the picture is
+always exactly what the editable file shows. A test checks that every picture
+was exported from the current .drawio file.
+
+The ERD is read from the UML class diagram in docs/erd.md. A second test reads
+the real PostgreSQL schema and fails if docs/erd.md differs from it, so the
+drawn ERD always matches the deployed database.
 
 Uses only the Python standard library.
 """
@@ -27,348 +34,755 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "diagrams"
 
-# Colours by kind of box: (fill, border, text)
-KINDS = {
-    "person":   ("#ffffff", "#17211f", "#17211f"),
-    "edge":     ("#ede7f6", "#5e35b1", "#311b92"),     # CloudFront, API Gateway
-    "compute":  ("#fff3e0", "#e65100", "#8a3b00"),     # Lambda
-    "storage":  ("#e8f5e9", "#2e7d32", "#1b5e20"),     # S3
-    "database": ("#e3f2fd", "#1565c0", "#0d47a1"),     # RDS, DynamoDB
-    "queue":    ("#fce4ec", "#ad1457", "#880e4f"),     # SQS
-    "dlq":      ("#ffebee", "#b42318", "#7f1d1d"),     # dead-letter queues
-    "service":  ("#f3f4f6", "#4b5563", "#1f2937"),     # SES, EventBridge and supporting services
-    "note":     ("#fffde7", "#a6792b", "#4a3a12"),
+INK = "#232F3E"            # AWS "squid ink": text and normal arrows
+MUTED = "#545B64"
+FAILURE = "#B42318"        # failure and recovery paths
+FONT = "fontFamily=Helvetica;"
+
+
+# ----------------------------------------------------------------------------
+# draw.io file writing
+# ----------------------------------------------------------------------------
+def attr(text):
+    """Escape a value for an XML attribute. draw.io reads html=1 labels as HTML."""
+    return escape(str(text), quote=True)
+
+
+class Drawing:
+    """The cells of one draw.io page, written in a fixed order so the file is reproducible."""
+
+    def __init__(self, name):
+        self.name = name
+        self.cells = []
+        self.ids = set()
+
+    def _id(self, cell_id):
+        if cell_id in self.ids:
+            raise ValueError(f"duplicate cell id {cell_id} in {self.name}")
+        self.ids.add(cell_id)
+        return cell_id
+
+    def vertex(self, cell_id, value, style, x, y, w, h, parent="1"):
+        self.cells.append(
+            f'<mxCell id="{self._id(cell_id)}" value="{attr(value)}" style="{attr(style)}" vertex="1" parent="{parent}">'
+            f'<mxGeometry x="{x}" y="{y}" width="{w}" height="{h}" as="geometry"/></mxCell>')
+        return cell_id
+
+    def edge(self, cell_id, style, source=None, target=None, value="", points=(), start=None, end=None,
+             labels=(), parent="1"):
+        """An arrow. `source`/`target` join it to cells; `start`/`end` are free (x, y) points instead.
+        `labels` = [(text, position from -1 at the source to 1 at the target, dx, dy)]."""
+        ends = (f' source="{source}"' if source else "") + (f' target="{target}"' if target else "")
+        geometry = []
+        if start:
+            geometry.append(f'<mxPoint x="{start[0]}" y="{start[1]}" as="sourcePoint"/>')
+        if end:
+            geometry.append(f'<mxPoint x="{end[0]}" y="{end[1]}" as="targetPoint"/>')
+        if points:
+            geometry.append('<Array as="points">' + "".join(f'<mxPoint x="{x}" y="{y}"/>' for x, y in points)
+                            + "</Array>")
+        self.cells.append(
+            f'<mxCell id="{self._id(cell_id)}" value="{attr(value)}" style="{attr(style)}" edge="1" parent="{parent}"'
+            f'{ends}><mxGeometry relative="1" as="geometry">{"".join(geometry)}</mxGeometry></mxCell>')
+        for index, (text, position, dx, dy) in enumerate(labels):
+            self.cells.append(
+                f'<mxCell id="{self._id(f"{cell_id}-label{index}")}" value="{attr(text)}" '
+                f'style="{attr(EDGE_LABEL)}" vertex="1" connectable="0" parent="{cell_id}">'
+                f'<mxGeometry x="{position}" relative="1" as="geometry"><mxPoint x="{dx}" y="{dy}" as="offset"/>'
+                f'</mxGeometry></mxCell>')
+        return cell_id
+
+    def text(self, cell_id, value, x, y, w, h, size=12, align="left", style=""):
+        return self.vertex(cell_id, value, f"text;html=1;whiteSpace=wrap;{FONT}fontSize={size};align={align};"
+                           f"verticalAlign=top;fontColor={INK};spacing=0;{style}", x, y, w, h)
+
+    def xml(self, width, height):
+        return (f'<mxfile host="FinTrust build_diagrams.py" type="device">\n'
+                f'  <diagram name="{attr(self.name)}" id="{attr(self.name)}">\n'
+                f'    <mxGraphModel dx="{width}" dy="{height}" grid="0" gridSize="10" guides="1" tooltips="1" '
+                f'connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="{width}" pageHeight="{height}" '
+                f'math="0" shadow="0" background="#FFFFFF">\n'
+                f'      <root>\n        <mxCell id="0"/>\n        <mxCell id="1" parent="0"/>\n'
+                + "".join(f"        {cell}\n" for cell in self.cells)
+                + "      </root>\n    </mxGraphModel>\n  </diagram>\n</mxfile>\n")
+
+
+EDGE_LABEL = (f"edgeLabel;html=1;resizable=0;{FONT}fontSize=10;fontColor={INK};labelBackgroundColor=#FFFFFF;"
+              "align=center;verticalAlign=middle;")
+
+
+def title_block(drawing, title, subtitle, width):
+    drawing.text("title", f"<b>{escape(title)}</b>", 30, 14, width - 60, 26, size=20)
+    drawing.text("subtitle", escape(subtitle), 30, 42, width - 60, 18, size=12, style=f"fontColor={MUTED};")
+
+
+# ----------------------------------------------------------------------------
+# 1. Architecture
+# ----------------------------------------------------------------------------
+# AWS Architecture Icons: each service is drawn with its official icon, in the
+# colour of its AWS category.
+CATEGORY = {
+    "compute": "#ED7100", "storage": "#7AA116", "database": "#C925D1", "integration": "#E7157B",
+    "network": "#8C4FFF", "security": "#DD344C", "management": "#E7157B", "devtools": "#C925D1",
+    "business": "#DD344C",
 }
-W, H = 164, 64
-OFFICER_X = 30
-COLUMN = [270, 510, 750, 990, 1230, 1470, 1710]
-ROW = [96, 206, 336, 456, 576, 700, 842]
+ICON = {   # service -> (draw.io AWS4 icon, category)
+    "lambda": ("lambda", "compute"), "ec2": ("ec2", "compute"),
+    "s3": ("s3", "storage"),
+    "rds": ("rds", "database"), "dynamodb": ("dynamodb", "database"),
+    "sqs": ("sqs", "integration"), "eventbridge": ("eventbridge", "integration"), "sns": ("sns", "integration"),
+    "cloudfront": ("cloudfront", "network"), "apigateway": ("api_gateway", "network"),
+    "cognito": ("cognito", "security"), "iam": ("identity_and_access_management", "security"),
+    "kms": ("key_management_service", "security"),
+    "cloudwatch": ("cloudwatch_2", "management"), "ssm": ("systems_manager", "management"),
+    "cloudtrail": ("cloudtrail", "management"), "xray": ("xray", "devtools"),
+    "ses": ("simple_email_service", "business"),
+}
+CARD_W, CARD_H, ICON_SIZE = 214, 58, 38
+
+GROUPS = {   # official AWS group styles: (icon, border, label colour)
+    "cloud": ("group_aws_cloud_alt", "#232F3E", "#232F3E"),
+    "region": ("group_region", "#00A4A6", "#147EBA"),
+    "vpc": ("group_vpc2", "#8C4FFF", "#8C4FFF"),
+    "subnet": ("group_security_group", "#00A4A6", "#147EBA"),
+}
+
+# Where each card goes (left x, top y). Columns and rows leave lanes between
+# the cards for the arrows, so that only two arrows cross (drawn with a hop).
+X_USER = 24
+L0, L1, L2 = 300, 584, 868                # outside the VPC
+VPC_X, VPC_Y, VPC_W, VPC_H = 1120, 118, 586, 542
+V0, V1 = 1164, 1448                       # inside the VPC
+D0, D1 = 1780, 2064                       # DynamoDB, alerting
+Y0, Y1, Y2, Y3, Y4, Y5 = 190, 312, 434, 556, 678, 800
 
 
-def at(column, row):
-    return COLUMN[column], ROW[row]
+def architecture_cards():
+    """name -> (x, y, service, title, detail, failure path?)"""
+    return {
+        "users": (X_USER, Y1, None, "Compliance staff", "officer or analyst", False),
+        "cloudfront": (L0, Y0, "cloudfront", "Amazon CloudFront", "HTTPS, security headers", False),
+        "web": (L1, Y0, "s3", "S3 dashboard bucket", "private, CloudFront only", False),
+        "eventbridge": (L2, Y0, "eventbridge", "EventBridge rule", "cron: 1st of each month", False),
+        "cognito": (L0, Y1, "cognito", "Amazon Cognito", "user pool, MFA, two roles", False),
+        "reports": (L2, Y1, "s3", "S3 reports bucket", "monthly CSV + JSON", False),
+        "apigw": (L0, Y2, "apigateway", "Amazon API Gateway", "REST: API key + Cognito", False),
+        "raw": (L0, Y3, "s3", "S3 raw bucket", "uploaded CSV files", False),
+        "ingest": (L1, Y3, "lambda", "ingest Lambda", "validates every row", False),
+        "fifo": (L2, Y3, "sqs", "SQS FIFO queue", "in order per account", False),
+        "quarantine": (L0, Y4, "s3", "S3 quarantine bucket", "invalid rows + reasons", False),
+        "processed": (L1, Y4, "s3", "S3 processed bucket", "clean rows", False),
+        "fifodlq": (L2, Y4, "sqs", "FIFO dead-letter queue", "after 3 failed attempts", True),
+        "ingestdlq": (L1, Y5, "sqs", "ingest dead-letter queue", "after 2 retries", True),
+        "report": (V1, Y0, "lambda", "report Lambda", "monthly report, read only", False),
+        "tunnel": (V0, Y1, "ec2", "EC2 tunnel instance", "admin SQL, no public IP", False),
+        "query": (V0, Y2, "lambda", "query Lambda", "the REST API", False),
+        "rds": (V1, Y2, "rds", "RDS PostgreSQL", "the ledger, private", False),
+        "score": (V0, Y3, "lambda", "score Lambda", "applies the risk rules", False),
+        "sessions": (D0, Y1, "dynamodb", "DynamoDB sessions", "one record per sign-in", False),
+        "events": (D0, Y3, "dynamodb", "DynamoDB events", "scores + journey steps", False),
+        "alert": (D0, Y4, "lambda", "alert Lambda", "Stream: HIGH scores only", False),
+        "ses": (D1, Y4, "ses", "Amazon SES", "email to compliance", False),
+        "alertdlq": (D0, Y5, "sqs", "alert dead-letter queue", "emails that failed", True),
+    }
 
 
-# id: (x, y, width, height, kind, lines of text)
-def architecture_boxes():
-    boxes = {}
-
-    def box(name, column, row, kind, *lines, w=W, h=H, dx=0, dy=0):
-        x, y = at(column, row)
-        boxes[name] = (x + dx, y + dy, w, h, kind, lines)
-
-    boxes["officer"] = (OFFICER_X, (ROW[0] + ROW[1]) // 2, W, H, "person", ("Compliance officer", "browser or curl"))
-    box("cloudfront", 0, 0, "edge", "CloudFront", "HTTPS, security headers")
-    box("webbucket", 1, 0, "storage", "S3 dashboard bucket", "private: CloudFront only")
-    box("apigw", 0, 1, "edge", "API Gateway (REST)", "API key + usage plan")
-    box("query", 3, 1, "compute", "query Lambda", "the REST API")
-    box("rds", 4, 2, "database", "RDS PostgreSQL", "ledger, no public endpoint")
-    box("raw", 0, 3, "storage", "S3 raw bucket", "uploaded CSV files")
-    box("ingest", 1, 3, "compute", "ingest Lambda", "validate each row (ETL)")
-    box("fifo", 2, 3, "queue", "SQS FIFO queue", "ordered per account")
-    box("score", 3, 3, "compute", "score Lambda", "apply risk rules")
-    box("dynamo", 5, 3, "database", "DynamoDB", "scores + journey events")
-    box("alert", 6, 3, "compute", "alert Lambda", "HIGH scores only")
-    box("quarantine", 0, 4, "storage", "S3 quarantine bucket", "invalid rows + reasons")
-    box("processed", 1, 4, "storage", "S3 processed bucket", "clean rows")
-    box("dlq", 2, 4, "dlq", "FIFO dead-letter queue", "after 3 failed attempts")
-    box("report", 3, 4, "compute", "report Lambda", "monthly CSV + JSON")
-    box("reports", 5, 4, "storage", "S3 reports bucket", "monthly reports")
-    box("ses", 6, 4, "service", "Amazon SES", "email to compliance")
-    box("ingestdlq", 1, 2, "dlq", "ingest dead-letter queue", "files that failed", h=46, dy=44)
-    box("alertdlq", 6, 2, "dlq", "alert dead-letter queue", "emails that failed", h=46, dy=44)
-    box("eventbridge", 3, 5, "service", "EventBridge rule", "cron: 1st of the month")
-    # supporting services
-    wide = 196
-    for index, (name, lines) in enumerate([
-        ("iam", ("IAM", "one least-privilege role per", "Lambda + permission boundary")),
-        ("kms", ("KMS key", "encrypts buckets, queues", "and the alarm topic")),
-        ("ssm", ("SSM Parameter Store", "application settings", "no secrets in code")),
-        ("cloudwatch", ("CloudWatch + SNS", "logs, FinTrust/ETL metrics,", "7 alarms, dashboard")),
-        ("xray", ("X-Ray", "tracing on the API stage", "and every Lambda")),
-        ("cloudtrail", ("CloudTrail", "audit: who changed what", "in the account")),
-    ]):
-        boxes[name] = (270 + index * 268, ROW[6], wide, 78, "service", lines)
-    return boxes
-
-
-# (name, x, y, width, height, label): drawn behind the boxes
-ARCHITECTURE_GROUPS = [
-    ("region", 244, 46, 1656, 746, "AWS account, Region eu-north-1 (Stockholm)"),
-    ("vpc", 966, 176, 452, 484,
-     "VPC: two private subnets in two Availability Zones. No internet gateway, no NAT Gateway."),
-    ("support", 244, 808, 1656, 126, "Used by every part of the system"),
+SUPPORT = [   # services every component uses: (service, title, detail)
+    ("cloudwatch", "Amazon CloudWatch", "logs, FinTrust/ETL metrics, alarms"),
+    ("xray", "AWS X-Ray", "traces: API stage, every Lambda"),
+    ("sns", "Amazon SNS", "alarm emails, encrypted topic"),
+    ("kms", "AWS KMS", "customer key: S3, SQS, SNS"),
+    ("ssm", "SSM Parameter Store", "settings, no secrets in code"),
+    ("eventbridge", "EventBridge Scheduler", "stops RDS + tunnel at 20:00"),
+]
+GLOBAL = [
+    ("iam", "AWS IAM", "one least-privilege role per Lambda"),
+    ("cloudtrail", "AWS CloudTrail", "who changed what in the account"),
 ]
 
-# (from, to, label, waypoints). Waypoints are corner points for an arrow that must go round other boxes.
+# (id, source, target, label, kind, exit, entry, waypoints)
+#   exit/entry: (x, y) as fractions of the card's width and height
+#   kinds: "flow" (data or a request), "failure" (failure path), "control" (checks, schedules, admin)
 ARCHITECTURE_ARROWS = [
-    # (from, to, label, corner points, where along the arrow the label sits: 0 = start, 1 = end)
-    ("officer", "cloudfront", "HTTPS", [], 0.5),
-    ("cloudfront", "webbucket", "signed", [], 0.5),
-    ("officer", "apigw", "x-api-key", [], 0.5),
-    ("apigw", "query", "every route needs the API key", [], 0.45),
-    ("query", "raw", "POST /upload stores the file", [(1040, 302), (352, 302)], 0.5),
-    ("raw", "ingest", "S3 event", [], 0.5),
-    ("ingest", "quarantine", "invalid rows", [], 0.5),
-    ("ingest", "processed", "clean rows", [], 0.5),
-    ("ingest", "ingestdlq", "on failure", [], 0.5),
-    ("ingest", "fifo", "queued", [], 0.5),
-    ("fifo", "dlq", "3 failures", [], 0.5),
-    ("fifo", "score", "", [], 0.5),
-    ("score", "rds", "ledger + alerts", [], 0.5),
-    ("score", "dynamo", "score + rules", [], 0.72),
-    ("query", "rds", "read, resolve, flag", [], 0.5),
-    ("query", "dynamo", "journey", [(1552, 238)], 0.5),
-    ("dynamo", "alert", "stream", [], 0.5),
-    ("alert", "ses", "", [], 0.5),
-    ("alert", "alertdlq", "on failure", [], 0.5),
-    ("eventbridge", "report", "", [], 0.5),
-    ("report", "rds", "read only", [], 0.22),
-    ("report", "reports", "CSV + JSON", [], 0.78),
+    ("e-signin", "users", "cognito", "", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-page", "users", "cloudfront", "", "flow", (1, 0.25), (0, 0.5), [(243, 326.5), (243, 219)]),
+    ("e-api", "users", "apigw", "", "flow", (1, 0.75), (0, 0.5), [(243, 355.5), (243, 463)]),
+    ("e-oac", "cloudfront", "web", "OAC", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-authorizer", "apigw", "cognito", "checks the token", "control", (0.5, 0), (0.5, 1), []),
+    ("e-query", "apigw", "query", "", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-schedule", "eventbridge", "report", "monthly", "control", (1, 0.3), (0, 0.3), []),
+    ("e-report-rds", "report", "rds", "read only", "flow", (0.5, 1), (0.5, 0), []),
+    ("e-report-s3", "report", "s3endpoint", "", "flow", (0, 0.75), (1, 0.5), [(1142, 233.5), (1142, 341)]),
+    ("e-query-s3", "query", "s3endpoint", "", "flow", (0, 0.25), (1, 0.5), [(1142, 448.5), (1142, 341)]),
+    ("e-s3-reports", "s3endpoint", "reports", "", "flow", (0, 0.5), (1, 0.5), []),
+    ("e-s3-raw", "s3endpoint", "raw", "POST /upload", "flow", (0.5, 1), (0.5, 0), [(1120, 525), (407, 525)]),
+    ("e-tunnel", "tunnel", "rds", "admin psql", "control", (1, 0.5), (0.15, 0), [(1480.1, 341)]),
+    ("e-query-rds", "query", "rds", "", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-ingest", "raw", "ingest", "", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-queue", "ingest", "fifo", "", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-score", "fifo", "score", "", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-processed", "ingest", "processed", "clean", "flow", (0.5, 1), (0.5, 0), []),
+    ("e-quarantine", "ingest", "quarantine", "invalid", "flow", (0.2, 1), (0.5, 0), [(626.8, 646), (407, 646)]),
+    ("e-ingestdlq", "ingest", "ingestdlq", "on failure", "failure", (1, 0.85), (1, 0.5), [(825, 605.3), (825, 829)]),
+    ("e-fifodlq", "fifo", "fifodlq", "3 failures", "failure", (0.5, 1), (0.5, 0), []),
+    ("e-score-rds", "score", "rds", "", "flow", (1, 0.25), (0.2, 1), [(1490.8, 570.5)]),
+    ("e-score-ddb", "score", "ddbendpoint", "", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-query-ddb", "query", "ddbendpoint", "", "flow", (0.9, 1), (0.5, 0), [(1356.6, 524), (1706, 524)]),
+    ("e-ddb-events", "ddbendpoint", "events", "", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-ddb-sessions", "ddbendpoint", "sessions", "", "flow", (1, 0.2), (0, 0.5), [(1748, 574.2), (1748, 341)]),
+    ("e-stream", "events", "alert", "", "flow", (0.5, 1), (0.5, 0), []),
+    ("e-email", "alert", "ses", "", "flow", (1, 0.5), (0, 0.5), []),
+    ("e-alertdlq", "alert", "alertdlq", "after 3 retries", "failure", (0.5, 1), (0.5, 0), []),
 ]
 
-NOTE_Y = 690
-ARCHITECTURE_NOTES = [
-    (1230, NOTE_Y, 212, 84, ["Security group: the VPC Lambdas", "may reach RDS on port 5432 and", "nothing else. Database login is",
-                             "by IAM token: no password exists."]),
-    (1456, NOTE_Y, 200, 84, ["S3 and DynamoDB are reached", "from the VPC through gateway", "endpoints: free, and traffic",
-                             "stays on the AWS network."]),
-    (1670, NOTE_Y, 216, 84, ["Journey events are written to", "DynamoDB by the ingest, score", "and alert Lambdas at every step,",
-                             "including failed attempts."]),
+# Numbered steps, placed beside the arrow they describe: (number, x, y, text)
+STEPS = [
+    (1, 268, 312, "Staff sign in with a password and an authenticator code. Cognito issues an ID token for 30 minutes."),
+    (2, 268, 186, "The dashboard loads from CloudFront; its bucket stays private."),
+    (3, 268, 470, "Every API call carries the API key (which application) and the ID token (which person). "
+                  "The query Lambda checks the session and the role."),
+    (4, 720, 497, "POST /upload stores the CSV in the raw bucket, through the S3 gateway endpoint."),
+    (5, 537, 553, "The S3 event starts the ingest Lambda. Invalid rows go to quarantine with the reason."),
+    (6, 821, 553, "One message per valid transaction, grouped by account so its order is kept."),
+    (7, 1090, 553, "The score Lambda applies the rules and writes the ledger in one database transaction, "
+                   "then the score and its rule breakdown to DynamoDB."),
+    (8, 1897, 634, "The DynamoDB Stream passes HIGH scores to the alert Lambda, which emails compliance through SES."),
+    (9, 1250, 178, "On the 1st of each month EventBridge runs the report Lambda; CSV and JSON go to the reports bucket."),
+]
+
+NOTES = [
+    "No NAT Gateway and no internet route. The three VPC Lambdas reach S3 and DynamoDB through free gateway "
+    "endpoints, and log in to PostgreSQL with IAM database authentication: no database password exists.",
+    "Security groups: the Lambda group has no inbound rules; the RDS group accepts port 5432 only from the "
+    "Lambda group and the tunnel instance.",
+    "Journey steps (received, validated, queued, scored, alert sent, and every failure) are written to the "
+    "events table by the ingest, score and alert Lambdas.",
 ]
 
 
-# ------------------------------------------------------------------ geometry
-
-def centre(box):
-    x, y, w, h = box[:4]
-    return x + w / 2, y + h / 2
-
-
-def border_point(box, toward):
-    """Where the line from the box's centre toward a point leaves the box."""
-    x, y, w, h = box[:4]
-    cx, cy = centre(box)
-    dx, dy = toward[0] - cx, toward[1] - cy
-    if dx == 0 and dy == 0:
-        return cx, cy
-    scale = min((w / 2) / abs(dx) if dx else 1e9, (h / 2) / abs(dy) if dy else 1e9)
-    return cx + dx * scale, cy + dy * scale
-
-
-def arrow_points(boxes, source, target, waypoints):
-    first = waypoints[0] if waypoints else centre(boxes[target])
-    last = waypoints[-1] if waypoints else centre(boxes[source])
-    return [border_point(boxes[source], first), *waypoints, border_point(boxes[target], last)]
+def card(drawing, name, x, y, service, title, detail, failure, w=CARD_W, h=CARD_H):
+    """A white card with the service's AWS icon on the left and its name on the right."""
+    if service is None:          # the people using the system
+        drawing.vertex(name, f"<b>{escape(title)}</b><br><font color=\"{MUTED}\">{escape(detail)}</font>",
+                       f"rounded=1;arcSize=10;whiteSpace=wrap;html=1;{FONT}fontSize=12;fillColor=#FFFFFF;"
+                       f"strokeColor={INK};strokeWidth=1.5;align=left;spacingLeft=56;fontColor={INK};", x, y, w, h)
+        drawing.vertex(name + "-icon", "", f"sketch=0;outlineConnect=0;fontColor={INK};fillColor={INK};"
+                       "strokeColor=none;dashed=0;html=1;aspect=fixed;shape=mxgraph.aws4.users;",
+                       x + 10, y + (h - ICON_SIZE) / 2, ICON_SIZE, ICON_SIZE)
+        return
+    icon, category = ICON[service]
+    colour = CATEGORY[category]
+    border = (f"strokeColor={FAILURE};dashed=1;dashPattern=6 3;" if failure else f"strokeColor={colour};")
+    drawing.vertex(name, f"<b>{escape(title)}</b><br><font color=\"{MUTED}\" style=\"font-size:11px\">{escape(detail)}</font>",
+                   f"rounded=1;arcSize=10;whiteSpace=wrap;html=1;{FONT}fontSize=12;fillColor=#FFFFFF;{border}"
+                   f"strokeWidth=1.5;align=left;spacingLeft=56;spacingRight=4;fontColor={INK};", x, y, w, h)
+    drawing.vertex(name + "-icon", "", f"sketch=0;points=[];outlineConnect=0;fontColor={INK};fillColor={colour};"
+                   "strokeColor=#FFFFFF;dashed=0;html=1;aspect=fixed;"
+                   f"shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.{icon};",
+                   x + 10, y + (h - ICON_SIZE) / 2, ICON_SIZE, ICON_SIZE)
 
 
-# ----------------------------------------------------------------------- SVG
-
-FONT = "font-family=\"Helvetica, Arial, sans-serif\""
-
-
-def svg_text(x, y, lines, size, colour, bold_first=True, anchor="middle", line_height=None):
-    line_height = line_height or size + 3
-    start = y - (len(lines) - 1) * line_height / 2 + size * 0.35
-    parts = []
-    for index, line in enumerate(lines):
-        weight = "bold" if bold_first and index == 0 else "normal"
-        line_size = size if index == 0 else size - 1.5
-        parts.append(f'<text x="{x:.0f}" y="{start + index * line_height:.0f}" text-anchor="{anchor}" {FONT} '
-                     f'font-size="{line_size}" font-weight="{weight}" fill="{colour}">{escape(line)}</text>')
-    return "\n".join(parts)
+def group(drawing, name, kind, label, x, y, w, h, dashed=False):
+    icon, stroke, text = GROUPS[kind]
+    drawing.vertex(name, label, f"points=[];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;{FONT}"
+                   f"fontSize=12;fontStyle=1;container=0;pointerEvents=0;collapsible=0;recursiveResize=0;"
+                   f"shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.{icon};strokeColor={stroke};fillColor=none;"
+                   f"verticalAlign=top;align=left;spacingLeft=30;fontColor={text};dashed={1 if dashed else 0};",
+                   x, y, w, h)
 
 
-def svg_document(width, height, body, title):
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">\n'
-            f"<title>{escape(title)}</title>\n"
-            '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '
-            'orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker></defs>\n'
-            f'<rect width="{width}" height="{height}" fill="#ffffff"/>\n{body}\n</svg>\n')
+def endpoint(drawing, name, title, x, y):
+    """A VPC gateway endpoint, drawn on the VPC's edge."""
+    drawing.vertex(name, title, f"sketch=0;outlineConnect=0;fontColor={INK};fillColor={CATEGORY['network']};"
+                   f"strokeColor=none;dashed=0;html=1;{FONT}fontSize=10;fontStyle=1;aspect=fixed;"
+                   "verticalLabelPosition=bottom;verticalAlign=top;align=center;labelBackgroundColor=#FFFFFF;"
+                   "shape=mxgraph.aws4.endpoints;", x, y, 36, 36)
 
 
-def architecture_svg(boxes):
-    parts = [svg_text(40, 30, ["FinTrust Transaction Insights and Risk Monitoring System: architecture"], 20, "#0f2e2a",
-                      anchor="start")]
-    for name, x, y, w, h, label in ARCHITECTURE_GROUPS:
-        dash = ' stroke-dasharray="7 5"' if name == "vpc" else ""
-        fill = {"region": "#fafbfa", "vpc": "#eef6ff", "support": "#fafbfa"}[name]
-        stroke = {"region": "#6b7280", "vpc": "#1565c0", "support": "#9ca3af"}[name]
-        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="10" fill="{fill}" stroke="{stroke}" '
-                     f'stroke-width="1.5"{dash}/>')
-        parts.append(svg_text(x + 12, y + 16, [label], 12.5, stroke, anchor="start"))
-    for x, y, w, h, lines in ARCHITECTURE_NOTES:
-        fill, stroke, colour = KINDS["note"]
-        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="4" fill="{fill}" stroke="{stroke}"/>')
-        parts.append(svg_text(x + 8, y + h / 2, lines, 11.5, colour, bold_first=False, anchor="start", line_height=15))
-    for source, target, label, waypoints, where in ARCHITECTURE_ARROWS:
-        points = arrow_points(boxes, source, target, waypoints)
-        path = " ".join(f"{x:.0f},{y:.0f}" for x, y in points)
-        parts.append(f'<polyline points="{path}" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#arrow)"/>')
-        if label:
-            # label on the longest segment
-            longest = max(zip(points, points[1:], strict=False),
-                          key=lambda pair: abs(pair[1][0] - pair[0][0]) + abs(pair[1][1] - pair[0][1]))
-            mx = longest[0][0] + (longest[1][0] - longest[0][0]) * where
-            my = longest[0][1] + (longest[1][1] - longest[0][1]) * where
-            width = len(label) * 5.9 + 8
-            parts.append(f'<rect x="{mx - width / 2:.0f}" y="{my - 9:.0f}" width="{width:.0f}" height="17" rx="3" '
-                         'fill="#ffffff" fill-opacity="0.92"/>')
-            parts.append(svg_text(mx, my, [label], 10.5, "#374151", bold_first=False))
-    for x, y, w, h, kind, lines in boxes.values():
-        fill, stroke, colour = KINDS[kind]
-        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="7" fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>')
-        parts.append(svg_text(x + w / 2, y + h / 2, list(lines), 12.5, colour))
-    return svg_document(1920, 950, "\n".join(parts), "FinTrust architecture")
+ARROW = {
+    "flow": f"strokeColor={INK};strokeWidth=1.4;",
+    "failure": f"strokeColor={FAILURE};strokeWidth=1.4;dashed=1;dashPattern=6 3;",
+    "control": f"strokeColor={MUTED};strokeWidth=1.2;dashed=1;dashPattern=2 3;",
+}
 
 
-# -------------------------------------------------------------------- draw.io
+def architecture_drawio():
+    width, height = 2770, 1140
+    d = Drawing("FinTrust architecture")
+    title_block(d, "FinTrust Transaction Insights and Risk Monitoring System: AWS architecture",
+                "Region eu-north-1 (Stockholm) · serverless and event-driven, within the AWS Free Tier · "
+                "the numbers follow one transaction and are explained on the right", width)
 
-def drawio_document(name, cells, width, height):
-    body = "\n".join(cells)
-    return ('<mxfile host="app.diagrams.net">\n'
-            f'  <diagram name="{escape(name)}" id="{escape(name.lower().replace(" ", "-"))}">\n'
-            f'    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" page="1" pageWidth="{width}" pageHeight="{height}">\n'
-            '      <root>\n        <mxCell id="0"/>\n        <mxCell id="1" parent="0"/>\n'
-            f"{body}\n      </root>\n    </mxGraphModel>\n  </diagram>\n</mxfile>\n")
+    group(d, "g-cloud", "cloud", "AWS Cloud", 262, 64, 2068, 1046)
+    group(d, "g-region", "region", "Region eu-north-1 (Stockholm)", 278, 92, 2036, 900, dashed=True)
+    group(d, "g-vpc", "vpc", "VPC 10.0.0.0/16 · no internet gateway, no NAT Gateway", VPC_X, VPC_Y, VPC_W, VPC_H)
+    group(d, "g-subnets", "subnet", "Private subnets in eu-north-1a and eu-north-1b", VPC_X + 22, VPC_Y + 32,
+          VPC_W - 44, VPC_H - 46)
+    for name, (x, y, service, title, detail, failure) in architecture_cards().items():
+        card(d, name, x, y, service, title, detail, failure)
+    endpoint(d, "s3endpoint", "S3 gateway<br>endpoint", VPC_X - 18, 323)
+    endpoint(d, "ddbendpoint", "DynamoDB<br>gateway endpoint", VPC_X + VPC_W - 18, 567)
+
+    for edge_id, source, target, label, kind, exit_at, entry_at, points in ARCHITECTURE_ARROWS:
+        style = (f"edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;{FONT}fontSize=10;fontColor={INK};"
+                 "labelBackgroundColor=#FFFFFF;endArrow=block;endFill=1;endSize=7;jumpStyle=arc;jumpSize=10;"
+                 + ARROW[kind]
+                 + f"exitX={exit_at[0]};exitY={exit_at[1]};exitDx=0;exitDy=0;"
+                 + f"entryX={entry_at[0]};entryY={entry_at[1]};entryDx=0;entryDy=0;")
+        d.edge(edge_id, style, source, target, label, points)
+
+    for number, x, y, _text in STEPS:
+        d.vertex(f"step-{number}", str(number), f"ellipse;whiteSpace=wrap;html=1;aspect=fixed;{FONT}fontSize=11;"
+                 f"fontStyle=1;fillColor={INK};strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;", x, y, 24, 24)
+
+    # Supporting services, then global services.
+    d.text("support-title", "<b>Used by every part of the system</b>", 300, 890, 900, 18, size=12,
+           style=f"fontColor={MUTED};")
+    for index, (service, title, detail) in enumerate(SUPPORT):
+        card(d, f"support-{index}", 300 + index * 274, 912, service, title, detail, False, w=256)
+    d.text("global-title", "<b>Global services</b>", 300, 1008, 600, 18, size=12, style=f"fontColor={MUTED};")
+    for index, (service, title, detail) in enumerate(GLOBAL):
+        card(d, f"global-{service}", 300 + index * 274, 1030, service, title, detail, False, w=256)
+    d.text("free-tier", "<b>Free Tier sizing:</b> RDS db.t3.micro, stopped every night · DynamoDB 15 of 25 read "
+           "and 25 of 25 write units · gateway endpoints instead of a NAT Gateway (about $32 a month saved) · "
+           "Cognito Essentials, 10 000 monthly users free", 880, 1040, 1400, 40, size=11,
+           style=f"fontColor={MUTED};")
+
+    # The key, outside the AWS Cloud.
+    kx = 2370
+    d.text("key-title", "<b>How one transaction travels</b>", kx, 70, 360, 20, size=14)
+    y = 100
+    for number, _x, _y, text in STEPS:
+        d.vertex(f"key-{number}", str(number), f"ellipse;whiteSpace=wrap;html=1;aspect=fixed;{FONT}fontSize=11;"
+                 f"fontStyle=1;fillColor={INK};strokeColor=none;fontColor=#FFFFFF;", kx, y, 22, 22)
+        lines = 1 + len(text) // 50
+        d.text(f"key-{number}-text", escape(text), kx + 32, y + 2, 330, 16 * lines, size=11)
+        y += 16 * lines + 14
+    y += 6
+    d.text("legend-title", "<b>Arrows</b>", kx, y, 360, 20, size=14)
+    for index, (kind, meaning) in enumerate((("flow", "data or a request"), ("failure", "failure path: nothing is lost"),
+                                             ("control", "check, schedule or admin access"))):
+        line_y = y + 36 + index * 24
+        d.edge(f"legend-{kind}", "html=1;endArrow=block;endFill=1;endSize=7;" + ARROW[kind],
+               start=(kx, line_y), end=(kx + 56, line_y))
+        d.text(f"legend-{kind}-text", meaning, kx + 68, line_y - 8, 290, 16, size=11)
+    y += 36 + 3 * 24 + 8
+    d.vertex("legend-failure-card", "dead-letter queue", f"rounded=1;arcSize=10;html=1;{FONT}fontSize=11;"
+             f"fillColor=#FFFFFF;strokeColor={FAILURE};dashed=1;dashPattern=6 3;strokeWidth=1.5;fontColor={INK};",
+             kx, y, 140, 28)
+    d.text("legend-failure-card-text", "keeps what failed until it is fixed", kx + 152, y + 6, 210, 16, size=11)
+    y += 52
+    d.text("notes-title", "<b>Security and network</b>", kx, y, 360, 20, size=14)
+    y += 28
+    for index, note in enumerate(NOTES):
+        lines = 1 + len(note) // 50
+        d.text(f"note-{index}", "• " + escape(note), kx, y, 360, 16 * lines, size=11)
+        y += 16 * lines + 10
+    return d.xml(width, height)
 
 
-def vertex(cell_id, value, style, x, y, w, h, parent="1"):
-    return (f'        <mxCell id="{cell_id}" value="{escape(value, quote=True)}" style="{style}" vertex="1" parent="{parent}">\n'
-            f'          <mxGeometry x="{x:.0f}" y="{y:.0f}" width="{w:.0f}" height="{h:.0f}" as="geometry"/>\n        </mxCell>')
-
-
-def architecture_drawio(boxes):
-    cells = [vertex("title", "FinTrust Transaction Insights and Risk Monitoring System: architecture",
-                    "text;html=1;align=left;fontSize=20;fontStyle=1;fontColor=#0f2e2a;", 40, 10, 900, 30)]
-    for name, x, y, w, h, label in ARCHITECTURE_GROUPS:
-        dashed = "dashed=1;" if name == "vpc" else ""
-        fill = {"region": "#fafbfa", "vpc": "#eef6ff", "support": "#fafbfa"}[name]
-        stroke = {"region": "#6b7280", "vpc": "#1565c0", "support": "#9ca3af"}[name]
-        cells.append(vertex(f"group-{name}", label,
-                            f"rounded=1;arcSize=3;whiteSpace=wrap;html=1;{dashed}fillColor={fill};strokeColor={stroke};"
-                            f"fontColor={stroke};verticalAlign=top;align=left;spacingLeft=10;fontSize=12;", x, y, w, h))
-    for index, (x, y, w, h, lines) in enumerate(ARCHITECTURE_NOTES):
-        fill, stroke, colour = KINDS["note"]
-        cells.append(vertex(f"note-{index}", "<br>".join(escape(line) for line in lines),
-                            f"shape=note;size=10;whiteSpace=wrap;html=1;fillColor={fill};strokeColor={stroke};"
-                            f"fontColor={colour};align=left;spacingLeft=6;fontSize=11;", x, y, w, h))
-    for name, (x, y, w, h, kind, lines) in boxes.items():
-        fill, stroke, colour = KINDS[kind]
-        value = f"<b>{escape(lines[0])}</b>" + "".join(f"<br>{escape(line)}" for line in lines[1:])
-        cells.append(vertex(name, value, f"rounded=1;whiteSpace=wrap;html=1;fillColor={fill};strokeColor={stroke};"
-                                         f"fontColor={colour};fontSize=12;", x, y, w, h))
-    for index, (source, target, label, waypoints, _where) in enumerate(ARCHITECTURE_ARROWS):
-        points = "".join(f'<mxPoint x="{x}" y="{y}"/>' for x, y in waypoints)
-        array = f'<Array as="points">{points}</Array>' if waypoints else ""
-        cells.append(
-            f'        <mxCell id="arrow-{index}" value="{escape(label, quote=True)}" style="endArrow=block;html=1;rounded=0;'
-            f'strokeColor=#374151;fontSize=10;fontColor=#374151;labelBackgroundColor=#ffffff;" edge="1" parent="1" '
-            f'source="{source}" target="{target}">\n'
-            f'          <mxGeometry relative="1" as="geometry">{array}</mxGeometry>\n        </mxCell>')
-    return drawio_document("Architecture", cells, 1920, 950)
-
-
-# ----------------------------------------------------------------------- ERD
-
-ERD_POSITIONS = {"CUSTOMERS": (40, 80), "ACCOUNTS": (420, 80), "TRANSACTIONS": (800, 80),
-                 "ALERTS": (1180, 80), "RISK_EVENTS": (420, 350)}
-# (parent, child, verb, "one to many" or "one to zero or one")
-TABLE_WIDTH, ROW_HEIGHT, HEADER_HEIGHT = 250, 22, 30
+# ----------------------------------------------------------------------------
+# 2. ERD in UML class notation, read from docs/erd.md
+# ----------------------------------------------------------------------------
+ATTRIBUTE = re.compile(
+    r"^(?:«(?P<key>PK|FK)» )?(?P<name>[a-z_]+) : (?P<type>[a-z]+(?:\(\d+(?:,\d+)?\))?)"
+    r"(?P<nullable> \[0\.\.1\])?(?P<unique> \{unique\})?$"
+)
+RELATIONSHIP = re.compile(r'^\s*([a-z_]+) "([^"]+)" -- "([^"]+)" ([a-z_]+) : (.+)$', re.M)
 
 
 def read_erd():
-    """Tables, columns and relationships from the diagram source in docs/erd.md."""
-    text = (ROOT / "docs" / "erd.md").read_text()
-    block = text[text.index("erDiagram"):]
-    block = block[:block.index("```")]
+    """The UML class diagram in docs/erd.md, as
+    tables:        {table: [(name, type, key, nullable, unique)]}   in drawing order
+    relationships: [(parent, parent multiplicity, child multiplicity, child, name)]"""
+    text = (ROOT / "docs" / "erd.md").read_text(encoding="utf-8")
+    start = text.index("```mermaid")
+    block = text[start:text.index("```", start + 3)]
     tables = {}
-    for name, body in re.findall(r"^\s{4}([A-Z_]+) \{\n(.*?)^\s{4}\}", block, re.S | re.M):
-        tables[name] = [tuple(line.split()) for line in body.strip().splitlines()]       # (type, column[, PK|FK])
-    relationships = []
-    for parent, link, child, verb in re.findall(r'^\s{4}([A-Z_]+) (\S+) ([A-Z_]+) : "?([^"\n]+)"?', block, re.M):
-        relationships.append((parent, child, verb.strip(), "0..1" if link.endswith("o|") else "many"))
+    for name, body in re.findall(r"^\s*class ([a-z_]+) \{\n(.*?)^\s*\}", block, flags=re.M | re.S):
+        columns = []
+        for line in body.strip().splitlines():
+            line = line.strip()
+            if line == "<<table>>":
+                continue
+            match = ATTRIBUTE.match(line)
+            if not match:
+                raise ValueError(f"cannot read '{line}' in table {name} in docs/erd.md")
+            columns.append((match["name"], match["type"], match["key"] or "", bool(match["nullable"]),
+                            bool(match["unique"])))
+        tables[name] = columns
+    relationships = [(parent, one, many, child, label.strip()) for parent, one, many, child, label
+                     in RELATIONSHIP.findall(block)]
     return tables, relationships
 
 
-def erd_boxes(tables):
-    return {name: (*ERD_POSITIONS[name], TABLE_WIDTH, HEADER_HEIGHT + ROW_HEIGHT * len(columns), "table", columns)
-            for name, columns in tables.items()}
+ERD_POSITION = {"customers": (40, 130), "accounts": (420, 130), "transactions": (840, 130),
+                "alerts": (1290, 130), "risk_events": (420, 540)}
+ERD_WIDTH = 300
+ROW_H, HEAD_H = 22, 44
+
+# How each relationship is drawn: exit and entry sides, waypoints, and where its
+# name sits.
+ERD_ROUTES = {
+    ("customers", "accounts"): ((1, 0.3), (0, 0.3), []),
+    ("accounts", "transactions"): ((1, 0.3), (0, 0.18), []),
+    ("accounts", "risk_events"): ((0.5, 1), (0.5, 0), []),
+    ("transactions", "risk_events"): ((0.3, 1), (1, 0.35), [(930, 640)]),
+    ("transactions", "alerts"): ((1, 0.18), (0, 0.3), []),
+}
+DYNAMO_TABLES = [
+    ("fintrust-capstone-events", [("«PK» account_id : S", "partition key"),
+                                  ("«SK» tx_timestamp : S", "sort key: time#transaction id#record kind"),
+                                  ("record_type : S", "SCORE, EVENT or ALERT"),
+                                  ("transaction_id : S", "key of the by_transaction index"),
+                                  ("risk_score : N, risk_level : S, rules : L", "on SCORE items; the Stream filters on risk_level"),
+                                  ("stage : S, at : S, detail : S", "on EVENT items: one step of the journey"),
+                                  ("expires_at : N", "time-to-live: deleted after 12 months")]),
+    ("fintrust-capstone-sessions", [("«PK» session_id : S", "the sign-in's origin_jti from Cognito"),
+                                    ("username : S, display_name : S, roles : L", "who, and which role"),
+                                    ("status : S, end_reason : S", "ACTIVE or ENDED, and why it ended"),
+                                    ("started_epoch, last_seen_epoch, ends_epoch : N", "the 15-minute idle and 8-hour limits"),
+                                    ("user_agent : S", "which browser signed in"),
+                                    ("expires_at : N", "time-to-live: deleted after 90 days")]),
+]
 
 
-def erd_svg(tables, relationships):
-    boxes = erd_boxes(tables)
-    parts = [svg_text(40, 32, ["FinTrust ledger: entity relationship diagram (third normal form)"], 20, "#0f2e2a",
-                      anchor="start"),
-             svg_text(40, 56, ["PK = primary key, FK = foreign key. Generated from docs/erd.md, which is tested against the deployed schema."],
-                      12, "#586663", bold_first=False, anchor="start")]
-    for parent, child, verb, many in relationships:
-        start, end = border_point(boxes[parent], centre(boxes[child])), border_point(boxes[child], centre(boxes[parent]))
-        parts.append(f'<line x1="{start[0]:.0f}" y1="{start[1]:.0f}" x2="{end[0]:.0f}" y2="{end[1]:.0f}" stroke="#374151" '
-                     'stroke-width="1.6" marker-end="url(#arrow)"/>')
-        mx, my = (start[0] + end[0]) / 2, (start[1] + end[1]) / 2
-        label = f"{verb} (1 to {many})"
-        if abs(start[1] - end[1]) > 40 and abs(start[0] - end[0]) > 40:
-            my += 22                 # a slanted line: keep the label clear of the table above
-        width = len(label) * 6 + 8
-        parts.append(f'<rect x="{mx - width / 2:.0f}" y="{my - 9:.0f}" width="{width:.0f}" height="17" rx="3" fill="#ffffff"/>')
-        parts.append(svg_text(mx, my, [label], 10.5, "#374151", bold_first=False))
-    for name, (x, y, w, h, _kind, columns) in boxes.items():
-        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="5" fill="#ffffff" stroke="#1565c0" stroke-width="1.6"/>')
-        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{HEADER_HEIGHT}" rx="5" fill="#1565c0"/>')
-        parts.append(svg_text(x + w / 2, y + HEADER_HEIGHT / 2, [name.lower()], 13.5, "#ffffff"))
-        for index, column in enumerate(columns):
-            row_y = y + HEADER_HEIGHT + ROW_HEIGHT * index + ROW_HEIGHT / 2
-            key = column[2] if len(column) > 2 else ""
-            weight = "bold" if key == "PK" else "normal"
-            parts.append(f'<text x="{x + 10}" y="{row_y + 4:.0f}" {FONT} font-size="12" font-weight="{weight}" '
-                         f'fill="#17211f">{escape(column[1])}</text>')
-            parts.append(f'<text x="{x + w - 44}" y="{row_y + 4:.0f}" text-anchor="end" {FONT} font-size="11" '
-                         f'fill="#586663">{escape(column[0])}</text>')
-            if key:
-                parts.append(f'<text x="{x + w - 10}" y="{row_y + 4:.0f}" text-anchor="end" {FONT} font-size="11" '
-                             f'font-weight="bold" fill="{"#a6792b" if key == "PK" else "#1565c0"}">{key}</text>')
-    return svg_document(1470, 540, "\n".join(parts), "FinTrust ERD")
+def column_text(name, sql_type, key, nullable, unique):
+    text = f"{name} : {sql_type}"
+    if nullable:
+        text += " [0..1]"
+    if unique:
+        text += " {unique}"
+    if key:
+        text = f"«{key}» " + text
+    return text
 
 
 def erd_drawio(tables, relationships):
-    boxes = erd_boxes(tables)
-    cells = [vertex("title", "FinTrust ledger: entity relationship diagram (third normal form)",
-                    "text;html=1;align=left;fontSize=20;fontStyle=1;fontColor=#0f2e2a;", 40, 16, 800, 30)]
-    for name, (x, y, w, h, _kind, columns) in boxes.items():
-        cells.append(vertex(name, name.lower(),
-                            f"swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize={HEADER_HEIGHT};"
-                            "horizontalStack=0;resizeParent=1;collapsible=0;fillColor=#1565c0;fontColor=#ffffff;"
-                            "strokeColor=#1565c0;fontSize=13;", x, y, w, h))
+    width, height = 1640, 1010
+    d = Drawing("FinTrust ERD")
+    title_block(d, "FinTrust ledger: entity relationship diagram (UML class notation)",
+                "PostgreSQL 16 on Amazon RDS · third normal form · generated from docs/erd.md, which a test "
+                "compares with the deployed schema", width)
+    for table, columns in tables.items():
+        x, y = ERD_POSITION[table]
+        table_height = HEAD_H + ROW_H * len(columns) + 8
+        d.vertex(f"t-{table}", f"«table»<br><b>{table}</b>",
+                 f"swimlane;html=1;whiteSpace=wrap;{FONT}fontSize=13;fontStyle=0;align=center;verticalAlign=top;"
+                 f"childLayout=stackLayout;horizontal=1;startSize={HEAD_H};horizontalStack=0;resizeParent=1;"
+                 "resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#E8F1FB;swimlaneFillColor=#FFFFFF;"
+                 f"strokeColor=#1F5FA8;strokeWidth=1.5;fontColor={INK};rounded=0;",
+                 x, y, ERD_WIDTH, table_height)
         for index, column in enumerate(columns):
-            key = f" ({column[2]})" if len(column) > 2 else ""
-            bold = "fontStyle=1;" if key == " (PK)" else ""
-            cells.append(vertex(f"{name}-{column[1]}", f"{column[1]} : {column[0]}{key}",
-                                f"text;strokeColor=none;fillColor=none;align=left;spacingLeft=8;{bold}fontSize=12;"
-                                "fontColor=#17211f;", 0, HEADER_HEIGHT + ROW_HEIGHT * index, w, ROW_HEIGHT, parent=name))
-    for index, (parent, child, verb, many) in enumerate(relationships):
-        end = "ERzeroToOne" if many == "0..1" else "ERzeroToMany"
-        cells.append(
-            f'        <mxCell id="rel-{index}" value="{escape(verb, quote=True)}" style="edgeStyle=entityRelationEdgeStyle;'
-            f'html=1;startArrow=ERmandOne;endArrow={end};strokeColor=#374151;fontSize=10;labelBackgroundColor=#ffffff;" '
-            f'edge="1" parent="1" source="{parent}" target="{child}">\n'
-            '          <mxGeometry relative="1" as="geometry"/>\n        </mxCell>')
-    return drawio_document("ERD", cells, 1470, 540)
+            name, sql_type, key, nullable, unique = column
+            emphasis = "fontStyle=4;" if key == "PK" else ("fontStyle=2;" if key == "FK" else "")
+            d.vertex(f"t-{table}-{name}", escape(column_text(*column)),
+                     f"text;html=1;{FONT}fontSize=12;align=left;verticalAlign=middle;spacingLeft=10;"
+                     f"strokeColor=none;fillColor=none;fontColor={INK};{emphasis}"
+                     "points=[[0,0.5],[1,0.5]];portConstraint=eastwest;",
+                     0, HEAD_H + index * ROW_H, ERD_WIDTH, ROW_H, parent=f"t-{table}")
+    for parent, one, many, child, label in relationships:
+        exit_at, entry_at, points = ERD_ROUTES[(parent, child)]
+        style = (f"edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;{FONT}fontSize=11;fontColor={INK};"
+                 f"strokeColor={INK};strokeWidth=1.3;endArrow=none;startArrow=none;labelBackgroundColor=#FFFFFF;"
+                 f"exitX={exit_at[0]};exitY={exit_at[1]};exitDx=0;exitDy=0;"
+                 f"entryX={entry_at[0]};entryY={entry_at[1]};entryDx=0;entryDy=0;")
+        d.edge(f"r-{parent}-{child}", style, f"t-{parent}", f"t-{child}", f"<i>{escape(label)}</i> ▸", points,
+               labels=[(one, -0.85, 0, -10), (many, 0.85, 0, -10)])
+
+    # The DynamoDB tables are not relational, so they are drawn apart, keys only.
+    fx, fy, fw = 1180, 380, 420
+    row_h = 34
+    heights = [HEAD_H + row_h * len(attributes) for _table, attributes in DYNAMO_TABLES]
+    d.vertex("dynamo-frame", "<b>DynamoDB</b>: not relational, so no joins or foreign keys; key design only",
+             f"rounded=0;html=1;whiteSpace=wrap;{FONT}fontSize=12;fillColor=none;strokeColor=#C925D1;dashed=1;"
+             f"verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontColor={INK};",
+             fx, fy, fw, 44 + sum(heights) + 18 * len(heights))
+    y = fy + 40
+    for index, (table, attributes) in enumerate(DYNAMO_TABLES):
+        d.vertex(f"dd-{index}", f"«DynamoDB table»<br><b>{table}</b>",
+                 f"swimlane;html=1;whiteSpace=wrap;{FONT}fontSize=12;fontStyle=0;align=center;verticalAlign=top;"
+                 f"childLayout=stackLayout;horizontal=1;startSize={HEAD_H};horizontalStack=0;resizeParent=1;"
+                 "resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;fillColor=#F7EAF8;"
+                 f"swimlaneFillColor=#FFFFFF;strokeColor=#C925D1;strokeWidth=1.5;fontColor={INK};",
+                 fx + 16, y, fw - 32, heights[index])
+        for row, (attribute, meaning) in enumerate(attributes):
+            d.vertex(f"dd-{index}-{row}", f"{escape(attribute)}<br><font color=\"{MUTED}\" style=\"font-size:10px\">"
+                     f"{escape(meaning)}</font>",
+                     f"text;html=1;{FONT}fontSize=12;align=left;verticalAlign=middle;spacingLeft=10;strokeColor=none;"
+                     f"fillColor=none;fontColor={INK};", 0, HEAD_H + row * row_h, fw - 32, row_h, parent=f"dd-{index}")
+        y += heights[index] + 18
+
+    # How to read it.
+    ky = 820
+    d.text("key-title", "<b>How to read it</b>", 40, ky, 700, 20, size=14)
+    rows = [
+        ("«table»", "one PostgreSQL table; each line is a column, as name : type"),
+        ("«PK» underlined", "primary key: identifies each row"),
+        ("«FK» italic", "foreign key: refers to the primary key of the table it is linked to"),
+        ("[0..1]", "the column may be empty (NULL); every other column is NOT NULL"),
+        ("{unique}", "no two rows may hold the same value"),
+        ("1 · 0..1 · 0..*", "multiplicity at each end: exactly one, zero or one, zero or more"),
+        ("owns ▸", "the relationship's name, read in the direction of the arrowhead"),
+    ]
+    for index, (notation, meaning) in enumerate(rows):
+        d.text(f"key-{index}-n", f"<b>{escape(notation)}</b>", 40, ky + 28 + index * 20, 150, 18, size=11)
+        d.text(f"key-{index}-m", escape(meaning), 196, ky + 28 + index * 20, 560, 18, size=11)
+    d.text("checks", "<b>Rules the diagram cannot show</b><br>CHECK constraints on every type, channel, level and "
+           "status · amount &gt; 0 · one alert per transaction · a resolved alert records who and when · only a "
+           "manual flag names a person · ON DELETE RESTRICT on every foreign key.<br><br><b>Indexes</b><br>"
+           "transactions (account_id), (tx_date), (account_id, tx_date), (risk_level) · accounts (customer_id) · "
+           "risk_events (account_id), (transaction_id) · alerts (status)", 800, ky, 350, 170, size=11)
+    return d.xml(width, height)
+
+
+# ----------------------------------------------------------------------------
+# 3. UML sequence diagrams
+# ----------------------------------------------------------------------------
+LIFELINE_GAP = 214
+HEAD_TOP, HEAD_HEIGHT = 92, 54
+STEP = 40
+
+
+class Sequence:
+    """A UML sequence diagram, laid out from top to bottom as messages are added."""
+
+    def __init__(self, name, participants):
+        self.d = Drawing(name)
+        self.order = [key for key, *_ in participants]
+        self.participants = {key: (title, subtitle, kind) for key, title, subtitle, kind in participants}
+        self.y = HEAD_TOP + HEAD_HEIGHT + 34
+        self.number = 0
+        self.active = {}          # participant -> list of open activation start ys
+        self.bars = []            # (participant, top, bottom, depth)
+        self.frames = []          # (kind, guard, top, bottom, left, right, dividers)
+        self.items = []           # deferred messages and notes, drawn after the bars
+
+    def x(self, key):
+        return 120 + self.order.index(key) * LIFELINE_GAP
+
+    def _edge_x(self, key, toward):
+        depth = len(self.active.get(key, []))
+        offset = 5 * depth if depth else 0
+        centre = self.x(key)
+        return centre + offset if toward > centre else centre - offset
+
+    def activate(self, key):
+        self.active.setdefault(key, []).append(self.y - 6)
+
+    def deactivate(self, key, extra=10):
+        top = self.active[key].pop()
+        self.bars.append((key, top, self.y - STEP + extra, len(self.active[key])))
+
+    def message(self, source, target, text, kind="sync", activate=False, deactivate=False):
+        """kind: sync (solid, filled head), async (solid, open head) or reply (dashed, open head)."""
+        self.number += 1
+        if activate:
+            self.activate(target)
+        x1 = self._edge_x(source, self.x(target))
+        x2 = self._edge_x(target, self.x(source))
+        self.items.append(("message", x1, x2, self.y, f"{self.number}: {text}", kind))
+        self.y += STEP
+        if deactivate:
+            self.deactivate(source)
+
+    def self_call(self, key, text):
+        self.number += 1
+        x = self.x(key) + 5 * len(self.active.get(key, []))
+        self.items.append(("self", x, self.y, f"{self.number}: {text}"))
+        self.y += STEP + 16
+
+    def note(self, first, last, text, height=34):
+        left = self.x(first) - 90
+        right = self.x(last) + 90
+        self.items.append(("note", left, self.y - 14, right - left, height, text))
+        self.y += height + 10
+
+    def frame(self, kind, guard, first, last):
+        """Open a combined fragment (loop, alt, opt) spanning participants first..last. Returns a handle."""
+        handle = {"kind": kind, "guard": guard, "top": self.y - 22, "first": first, "last": last, "dividers": []}
+        self.y += 18
+        return handle
+
+    def divider(self, handle, guard):
+        handle["dividers"].append((self.y - 14, guard))
+        self.y += 30
+
+    def close(self, handle):
+        left = self.x(handle["first"]) - 96
+        right = self.x(handle["last"]) + 96
+        self.frames.append((handle["kind"], handle["guard"], handle["top"], self.y - 12, left, right,
+                            handle["dividers"]))
+        self.y += 18
+
+    def xml(self, title, subtitle):
+        bottom = self.y + 30
+        width = self.x(self.order[-1]) + 140
+        height = bottom + 40
+        d = self.d
+        title_block(d, title, subtitle, width)
+        for key in self.order:
+            title_text, subtitle_text, kind = self.participants[key]
+            x = self.x(key)
+            if kind == "actor":
+                d.vertex(f"p-{key}", f"<b>{escape(title_text)}</b>",
+                         f"shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;{FONT}fontSize=12;"
+                         f"fillColor=#FFFFFF;strokeColor={INK};fontColor={INK};", x - 14, HEAD_TOP - 6, 28, 44)
+            else:
+                d.vertex(f"p-{key}", f"<b>{escape(title_text)}</b><br><font color=\"{MUTED}\" "
+                         f"style=\"font-size:10px\">{escape(subtitle_text)}</font>",
+                         f"rounded=0;whiteSpace=wrap;html=1;{FONT}fontSize=12;fillColor=#E8F1FB;strokeColor=#1F5FA8;"
+                         f"fontColor={INK};", x - 96, HEAD_TOP, 192, HEAD_HEIGHT)
+            d.edge(f"life-{key}", f"html=1;endArrow=none;dashed=1;dashPattern=4 4;strokeColor={MUTED};strokeWidth=1;",
+                   start=(x, HEAD_TOP + HEAD_HEIGHT), end=(x, bottom))
+        for index, (kind, guard, top, frame_bottom, left, right, dividers) in enumerate(self.frames):
+            d.vertex(f"frame-{index}", kind, f"shape=umlFrame;whiteSpace=wrap;html=1;{FONT}fontSize=11;fontStyle=1;"
+                     f"width=52;height=22;boundedLbl=1;verticalAlign=middle;align=center;fillColor=none;"
+                     f"swimlaneFillColor=none;strokeColor={MUTED};fontColor={INK};",
+                     left, top, right - left, frame_bottom - top)
+            d.text(f"frame-{index}-guard", f"[{escape(guard)}]", left + 60, top + 4, right - left - 70, 16, size=11,
+                   style=f"fontColor={MUTED};fontStyle=2;labelBackgroundColor=#FFFFFF;")
+            for divider_index, (divider_y, divider_guard) in enumerate(dividers):
+                d.edge(f"frame-{index}-else-{divider_index}", f"html=1;endArrow=none;dashed=1;dashPattern=6 4;"
+                       f"strokeColor={MUTED};", start=(left, divider_y), end=(right, divider_y))
+                d.text(f"frame-{index}-else-{divider_index}-guard", f"[{escape(divider_guard)}]", left + 8,
+                       divider_y + 3, right - left - 16, 16, size=11,
+                       style=f"fontColor={MUTED};fontStyle=2;labelBackgroundColor=#FFFFFF;")
+        for index, (key, top, bar_bottom, depth) in enumerate(sorted(self.bars, key=lambda bar: (bar[3], bar[1]))):
+            d.vertex(f"bar-{index}", "", f"rounded=0;html=1;fillColor=#FFFFFF;strokeColor={INK};strokeWidth=1;",
+                     self.x(key) - 5 + 5 * depth, top, 10, max(bar_bottom - top, 14))
+        for index, item in enumerate(self.items):
+            if item[0] == "message":
+                _, x1, x2, y, text, kind = item
+                style = {"sync": "endArrow=block;endFill=1;", "async": "endArrow=open;endFill=0;",
+                         "reply": "endArrow=open;endFill=0;dashed=1;dashPattern=6 4;"}[kind]
+                d.edge(f"m-{index}", f"html=1;{FONT}fontSize=11;fontColor={INK};strokeColor={INK};strokeWidth=1.2;"
+                       f"endSize=8;verticalAlign=bottom;labelBackgroundColor=#FFFFFF;{style}", value=escape(text),
+                       start=(x1, y), end=(x2, y))
+            elif item[0] == "self":
+                _, x, y, text = item
+                d.edge(f"m-{index}", f"html=1;{FONT}fontSize=11;fontColor={INK};strokeColor={INK};strokeWidth=1.2;"
+                       "endArrow=block;endFill=1;endSize=8;align=left;spacingLeft=4;labelBackgroundColor=none;"
+                       "edgeStyle=none;", value="", start=(x + 5, y), end=(x + 5, y + 22),
+                       points=[(x + 40, y), (x + 40, y + 22)])
+                d.text(f"m-{index}-text", escape(text), x + 48, y - 2, 560, 18, size=11,
+                       style="labelBackgroundColor=#FFFFFF;")
+            else:
+                _, left, top, w, h, text = item
+                d.vertex(f"n-{index}", escape(text), f"shape=note;whiteSpace=wrap;html=1;size=12;{FONT}fontSize=11;"
+                         f"fillColor=#FFF8E1;strokeColor=#A6792B;fontColor={INK};align=left;spacingLeft=8;"
+                         "verticalAlign=middle;", left, top, w, h)
+        return d.xml(width, height)
+
+
+def pipeline_sequence_drawio():
+    s = Sequence("FinTrust pipeline sequence", [
+        ("officer", "Compliance officer", "", "actor"),
+        ("api", "API Gateway + query Lambda", "POST /upload", "box"),
+        ("raw", "S3 raw bucket", "KMS-encrypted", "box"),
+        ("ingest", "ingest Lambda", "outside the VPC", "box"),
+        ("fifo", "SQS FIFO queue", "group = account_id", "box"),
+        ("score", "score Lambda", "in the VPC", "box"),
+        ("rds", "RDS PostgreSQL", "the ledger", "box"),
+        ("ddb", "DynamoDB events", "score + journey", "box"),
+        ("alert", "alert Lambda", "Stream, HIGH only", "box"),
+        ("ses", "Amazon SES", "compliance mailbox", "box"),
+    ])
+    s.message("officer", "api", "POST /upload (CSV, API key, ID token)", activate=True)
+    s.message("api", "raw", "PutObject uploads/<file>.csv")
+    s.message("api", "officer", "202 Accepted: processing continues", "reply", deactivate=True)
+    s.message("raw", "ingest", "ObjectCreated event (asynchronous)", "async", activate=True)
+    s.self_call("ingest", "validate every row; invalid rows to the quarantine bucket with the reason")
+    s.message("ingest", "ddb", "journey: RECEIVED, VALIDATED")
+    s.message("ingest", "fifo", "SendMessage, one per valid row (deduplication id = transaction id)")
+    s.message("ingest", "ddb", "journey: QUEUED", deactivate=True)
+    outcome = s.frame("alt", "scoring succeeds", "fifo", "ses")
+    s.message("fifo", "score", "batch of messages (Lambda polls the queue)", "async", activate=True)
+    s.message("score", "rds", "BEGIN; account exists? transactions in the last hour?", activate=True)
+    s.self_call("score", "apply the rules")
+    s.message("score", "rds", "INSERT transaction, risk_events, alert if HIGH; COMMIT")
+    s.message("rds", "score", "committed", "reply", deactivate=True)
+    s.message("score", "ddb", "PutItem score + rule breakdown; journey: SCORED", deactivate=True)
+    s.message("ddb", "alert", "Stream record (filter: risk_level = HIGH)", "async", activate=True)
+    s.message("alert", "ses", "SendEmail: transaction, score, rules that fired")
+    s.message("alert", "ddb", "journey: ALERT_SENT", deactivate=True)
+    s.divider(outcome, "scoring fails, for example the account is not in the ledger yet")
+    s.message("fifo", "score", "message delivered", "async", activate=True)
+    s.message("score", "rds", "ROLLBACK: nothing is half-written")
+    s.message("score", "ddb", "journey: SCORE_FAILED (attempt n)")
+    s.message("score", "fifo", "batchItemFailures: [message id]", "reply", deactivate=True)
+    s.note("fifo", "score", "SQS shows the message again after the visibility timeout. After 3 failed attempts "
+           "it moves to the FIFO dead-letter queue and a CloudWatch alarm emails the team.", height=46)
+    s.note("fifo", "rds", "Recovery: fix the cause (scripts/onboard_account.py), then scripts/redrive_dlq.sh "
+           "moves the messages back. They are scored with no data re-entered.", height=46)
+    s.close(outcome)
+    return s.xml("One transaction, from upload to alert (UML sequence diagram)",
+                 "Steps 4 to 8 of the architecture diagram, and how a failed scoring is recovered without losing "
+                 "the transaction")
+
+
+def sign_in_sequence_drawio():
+    s = Sequence("FinTrust sign-in sequence", [
+        ("person", "Compliance officer", "", "actor"),
+        ("browser", "Dashboard", "browser: auth.js, app.js", "box"),
+        ("cognito", "Amazon Cognito", "managed login, user pool", "box"),
+        ("apigw", "API Gateway", "API key + Cognito authorizer", "box"),
+        ("query", "query Lambda", "session and role checks", "box"),
+        ("sessions", "DynamoDB sessions", "fintrust-capstone-sessions", "box"),
+    ])
+    s.message("person", "browser", "Sign in to the risk desk", activate=True)
+    s.self_call("browser", "random state and PKCE verifier; challenge = SHA-256(verifier)")
+    s.message("browser", "cognito", "GET /oauth2/authorize (client id, challenge, state)", activate=True)
+    s.message("person", "cognito", "username and password, then the 6-digit authenticator code")
+    s.message("cognito", "browser", "redirect back: one-time code + the same state", "reply", deactivate=True)
+    s.self_call("browser", "the state must match, or the answer is refused")
+    s.message("browser", "cognito", "POST /oauth2/token (code + verifier)", activate=True)
+    s.message("cognito", "browser", "ID token (30 minutes) + refresh token (8 hours)", "reply", deactivate=True)
+    s.message("browser", "apigw", "POST /session (x-api-key, Authorization: ID token)", activate=True)
+    s.self_call("apigw", "API key and usage plan; token signature, issuer and expiry")
+    s.message("apigw", "query", "request + claims: username, groups, origin_jti", activate=True)
+    s.message("query", "sessions", "PutItem if not exists (session_id = origin_jti)")
+    s.message("query", "apigw", "201: name, role, permissions", "reply", deactivate=True)
+    s.message("apigw", "browser", "201", "reply", deactivate=True)
+
+    loop = s.frame("loop", "every later request, for example GET /transactions", "browser", "sessions")
+    s.message("browser", "apigw", "GET /transactions + ID token (renewed before it expires)", activate=True)
+    s.message("apigw", "query", "request + claims", activate=True)
+    s.message("query", "sessions", "GetItem: ACTIVE? idle under 15 minutes? under 8 hours?")
+    s.message("query", "apigw", "200 rows · 401 SESSION_ENDED · 403 wrong role", "reply", deactivate=True)
+    s.message("apigw", "browser", "response", "reply", deactivate=True)
+    s.close(loop)
+
+    out = s.frame("opt", "the person signs out, or 15 minutes pass without activity", "browser", "sessions")
+    s.message("browser", "apigw", "DELETE /session", activate=True)
+    s.message("apigw", "query", "request + claims", activate=True)
+    s.message("query", "sessions", "UpdateItem: status ENDED, reason SIGNED_OUT or IDLE")
+    s.message("query", "apigw", "200: session ended", "reply", deactivate=True)
+    s.message("apigw", "browser", "200", "reply", deactivate=True)
+    s.message("browser", "cognito", "POST /oauth2/revoke (refresh token), then GET /logout", deactivate=True)
+    s.note("browser", "sessions", "The same ID token used again before it expires gets 401 SESSION_ENDED: "
+           "the session record, not the token, decides.", height=34)
+    s.close(out)
+    return s.xml("Sign-in, session and sign-out (UML sequence diagram)",
+                 "OAuth 2.0 authorization code flow with PKCE (RFC 7636) · MFA by authenticator app · "
+                 "sessions in DynamoDB")
+
+
+# ----------------------------------------------------------------------------
+DIAGRAMS = {
+    "architecture.drawio": architecture_drawio,
+    "erd.drawio": lambda: erd_drawio(*read_erd()),
+    "pipeline-sequence.drawio": pipeline_sequence_drawio,
+    "sign-in-sequence.drawio": sign_in_sequence_drawio,
+}
 
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    boxes = architecture_boxes()
-    tables, relationships = read_erd()
-    outputs = {
-        "architecture.svg": architecture_svg(boxes),
-        "architecture.drawio": architecture_drawio(boxes),
-        "erd.svg": erd_svg(tables, relationships),
-        "erd.drawio": erd_drawio(tables, relationships),
-    }
-    for name, text in outputs.items():
-        (OUT / name).write_text(text, encoding="utf-8")
-        print(f"Written docs/diagrams/{name}")
+    for name, build in DIAGRAMS.items():
+        (OUT / name).write_text(build(), encoding="utf-8")
+        print(f"Wrote docs/diagrams/{name}")
+    print("Next: python scripts/export_diagrams.py --webapp <draw.io src/main/webapp> (writes the .svg and .pdf)")
     return 0
 
 

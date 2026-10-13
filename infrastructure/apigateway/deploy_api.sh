@@ -5,8 +5,14 @@
 #   REST API  fintrust-capstone-api, regional endpoint, stage "dev"
 #   Every route requires an API key in the x-api-key header. API Gateway itself
 #   rejects a request without a valid key (403) before the Lambda is ever called.
+#   Week 15 Day 2: every route except GET /health also requires a signed-in
+#   person: a Cognito authorizer checks the ID token in the Authorization header
+#   (signature, issuer, expiry) and refuses a missing or bad one with 401.
 #   Usage plan: at most 10 requests per second (burst 20) and 5 000 per day.
-#   One API key attached to that usage plan.
+#   Two API keys on that usage plan, one per client application:
+#     compliance-key  the verification scripts and the end-to-end test
+#     dashboard-key   the web dashboard (written into its config.js)
+#   An API key says WHICH APPLICATION is calling; the Cognito token says WHO.
 #
 # REST API (not the cheaper "HTTP API") is used because only REST APIs support
 # API keys and usage plans, which the brief requires.
@@ -29,6 +35,13 @@ if [[ -z "$LAMBDA_ARN" ]]; then
   exit 1
 fi
 
+USER_POOL_ARN="$(aws ssm get-parameter --name "/fintrust/${FINTRUST_ENV}/cognito_user_pool_arn" \
+    --query Parameter.Value --output text 2>/dev/null || true)"
+if [[ -z "$USER_POOL_ARN" ]]; then
+  echo "ERROR: sign-in is not set up. Run ./infrastructure/cognito/deploy_auth.sh first." >&2
+  exit 1
+fi
+
 mkdir -p "$ROOT/build"
 DEFINITION="$ROOT/build/openapi.json"
 # Errors produced by API Gateway itself (a missing key, a throttled request) never
@@ -38,7 +51,8 @@ CORS_ORIGIN="$(aws ssm get-parameter --name "/fintrust/${FINTRUST_ENV}/cors_allo
     --query Parameter.Value --output text 2>/dev/null | cut -d, -f1 || true)"
 CORS_ORIGIN="${CORS_ORIGIN:-*}"
 render "$HERE/openapi.json" \
-    | sed -e "s|__LAMBDA_ARN__|${LAMBDA_ARN}|g" -e "s|__CORS_ORIGIN__|${CORS_ORIGIN}|g" > "$DEFINITION"
+    | sed -e "s|__LAMBDA_ARN__|${LAMBDA_ARN}|g" -e "s|__CORS_ORIGIN__|${CORS_ORIGIN}|g" \
+          -e "s|__USER_POOL_ARN__|${USER_POOL_ARN}|g" > "$DEFINITION"
 echo "Browser access (CORS) allowed from: ${CORS_ORIGIN}"
 
 # ---------- API ----------
@@ -53,21 +67,35 @@ else
   echo "Updated API $API_NAME ($API_ID)"
 fi
 
-# ---------- make sure every route (except the browser preflight) needs the key ----------
+# ---------- make sure every route (except the browser preflight) is protected ----------
 # The definition already says so; this sets it explicitly as well, so a mistake
-# in openapi.json can never publish an open route.
+# in openapi.json can never publish an open route:
+#   every method          needs the API key
+#   every method but one  needs a Cognito sign-in (GET /health stays key-only, for monitoring)
+AUTHORIZER_ID="$(aws apigateway get-authorizers --rest-api-id "$API_ID" \
+    --query "items[?type=='COGNITO_USER_POOLS'].id | [0]" --output text | none_to_empty)"
+if [[ -z "$AUTHORIZER_ID" ]]; then
+  echo "ERROR: the Cognito authorizer was not created from openapi.json." >&2
+  exit 1
+fi
 ROUTES="$(aws apigateway get-resources --rest-api-id "$API_ID" --limit 500 \
-    --query 'items[?resourceMethods].[id, join(`,`, keys(resourceMethods))]' --output text)"
-while read -r RESOURCE_ID METHODS; do
+    --query 'items[?resourceMethods].[id, path, join(`,`, keys(resourceMethods))]' --output text)"
+while read -r RESOURCE_ID RESOURCE_PATH METHODS; do
   [[ -z "$RESOURCE_ID" ]] && continue
   for METHOD in ${METHODS//,/ }; do
-    if [[ "$METHOD" != "OPTIONS" ]]; then
-      aws apigateway update-method --rest-api-id "$API_ID" --resource-id "$RESOURCE_ID" \
-          --http-method "$METHOD" --patch-operations op=replace,path=/apiKeyRequired,value=true >/dev/null
+    [[ "$METHOD" == "OPTIONS" ]] && continue
+    if [[ "$RESOURCE_PATH" == "/health" ]]; then
+      aws apigateway update-method --rest-api-id "$API_ID" --resource-id "$RESOURCE_ID" --http-method "$METHOD" \
+          --patch-operations op=replace,path=/apiKeyRequired,value=true >/dev/null
+    else
+      aws apigateway update-method --rest-api-id "$API_ID" --resource-id "$RESOURCE_ID" --http-method "$METHOD" \
+          --patch-operations op=replace,path=/apiKeyRequired,value=true \
+                             op=replace,path=/authorizationType,value=COGNITO_USER_POOLS \
+                             "op=replace,path=/authorizerId,value=${AUTHORIZER_ID}" >/dev/null
     fi
   done
 done <<< "$ROUTES"
-echo "API key required on every route"
+echo "API key required on every route; Cognito sign-in required on every route except GET /health"
 
 # ---------- allow this API, and only this API, to invoke the Lambda ----------
 if ! OUTPUT="$(aws lambda add-permission --function-name "$FUNCTION_NAME" \
@@ -101,19 +129,23 @@ if [[ -z "$PLAN_ID" ]]; then
   echo "Created usage plan $PLAN_NAME"
 fi
 
-KEY_NAME="${PREFIX}-compliance-key"
-KEY_ID="$(aws apigateway get-api-keys --name-query "$KEY_NAME" --query 'items[0].id' --output text | none_to_empty)"
-if [[ -z "$KEY_ID" ]]; then
-  KEY_ID="$(aws apigateway create-api-key --name "$KEY_NAME" --enabled \
-      --description "FinTrust compliance team" --query id --output text)"
-  echo "Created API key $KEY_NAME"
-fi
-if ! OUTPUT="$(aws apigateway create-usage-plan-key --usage-plan-id "$PLAN_ID" \
-      --key-id "$KEY_ID" --key-type API_KEY 2>&1)"; then
-  if [[ "$OUTPUT" != *"ConflictException"* ]]; then
-    echo "$OUTPUT" >&2; exit 1
+make_key() {   # make_key <name> <description>
+  local key_id output
+  key_id="$(aws apigateway get-api-keys --name-query "$1" --query 'items[0].id' --output text | none_to_empty)"
+  if [[ -z "$key_id" ]]; then
+    key_id="$(aws apigateway create-api-key --name "$1" --enabled \
+        --description "$2" --query id --output text)"
+    echo "Created API key $1"
   fi
-fi
+  if ! output="$(aws apigateway create-usage-plan-key --usage-plan-id "$PLAN_ID" \
+        --key-id "$key_id" --key-type API_KEY 2>&1)"; then
+    if [[ "$output" != *"ConflictException"* ]]; then
+      echo "$output" >&2; exit 1
+    fi
+  fi
+}
+make_key "${PREFIX}-compliance-key" "FinTrust verification scripts and end-to-end test"
+make_key "${PREFIX}-dashboard-key" "FinTrust web dashboard (identifies the application; people sign in with Cognito)"
 
 API_URL="https://${API_ID}.execute-api.${AWS_REGION}.amazonaws.com/${STAGE}"
 echo "Saving setting:"
@@ -122,7 +154,6 @@ put_param api_url "$API_URL"
 echo
 echo "API ready:  $API_URL"
 echo
-echo "The API key is a secret, so it is not printed or stored in a file."
-echo "To use it in this terminal:"
+echo "To call the API from this terminal (signs in as the automation user):"
 echo "    source ./scripts/api_env.sh"
-echo "    curl -s -H \"x-api-key: \$API_KEY\" \"\$API_URL/health\""
+echo "    curl -s -H \"x-api-key: \$API_KEY\" -H \"Authorization: \$ID_TOKEN\" \"\$API_URL/transactions\""

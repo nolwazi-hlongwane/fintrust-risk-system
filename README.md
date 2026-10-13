@@ -13,16 +13,16 @@ This system does it automatically:
 3. Each good transaction gets a **risk score** from clear rules, for example "amount above R50 000" or "sent outside South Africa". The score always shows which rules produced it.
 4. Everything is **saved securely** in the bank's ledger.
 5. If a transaction is high risk, the compliance team **gets an email** within seconds.
-6. Staff can **search and review** transactions and alerts on a dashboard.
+6. Staff **sign in** with their own account, a password and a code from an authenticator app, then **search, sort, filter and review** transactions, alerts and accounts on a dashboard, in light or dark mode. Only compliance officers can resolve an alert or flag an account, and every decision is recorded under their name.
 7. Once a month, a **summary report** is produced for executives.
 
 If any step fails, nothing is lost: the transaction waits in a holding area until the problem is fixed, then continues.
 
 It runs entirely on Amazon Web Services (AWS) with no servers to manage, and is designed to cost nothing beyond the AWS Free Tier.
 
-![Architecture: a file flows from S3 through validation, a queue and scoring into the ledger, with alerts by email and a dashboard on top](docs/diagrams/architecture.svg)
+![AWS architecture: staff sign in with Cognito; a file flows from S3 through validation, a FIFO queue and scoring into the ledger in RDS and the event store in DynamoDB, with alerts by email, a monthly report and a dashboard](docs/diagrams/architecture.svg)
 
-The same diagram as a PDF: [docs/diagrams/architecture.pdf](docs/diagrams/architecture.pdf).
+The same diagram as a PDF: [docs/diagrams/architecture.pdf](docs/diagrams/architecture.pdf). The numbers follow one transaction; the key is on the right of the diagram.
 
 ## Project status
 
@@ -38,6 +38,8 @@ The same diagram as a PDF: [docs/diagrams/architecture.pdf](docs/diagrams/archit
 | Week 14 Day 3 | Automated Testing | Done |
 | Week 14 Day 4 | SQL Analytics and Reporting Layer, and the web dashboard | Done |
 | Week 14 Day 5 | End-to-End Integration and Submission | Done |
+| Week 15 Day 1 | Corrections and dashboard analytics (charts) | Done |
+| Week 15 Day 2 | Secure sign-in (Amazon Cognito, MFA, roles, sessions), light and dark mode, sorting and filtering, all diagrams redrawn | Done |
 
 Progress and evidence for each phase are recorded in [docs/build-log.md](docs/build-log.md).
 
@@ -46,7 +48,7 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 | Document | What it covers |
 |---|---|
 | [Final audit against the brief and rubric](docs/rubric-audit.md) | Every requirement, and where the proof is. **Start here if you are assessing the project** |
-| [Architecture diagram (PDF)](docs/diagrams/architecture.pdf) and [ERD (PDF)](docs/diagrams/erd.pdf) | The two diagram deliverables, with editable draw.io sources beside them |
+| Diagrams: [AWS architecture](docs/diagrams/architecture.pdf), [ERD in UML notation](docs/diagrams/erd.pdf), [transaction pipeline sequence](docs/diagrams/pipeline-sequence.pdf), [sign-in sequence](docs/diagrams/sign-in-sequence.pdf) | The diagram deliverables as PDF, with editable draw.io sources and SVGs beside them in `docs/diagrams/` |
 | [Project execution plan](docs/project-execution-plan.md) | Scope, phases, decisions |
 | [Architecture](docs/architecture.md) | Diagram, data flow, why each AWS service was chosen |
 | [API design](docs/api-design.md) | Every route, request, response and error |
@@ -58,7 +60,7 @@ Progress and evidence for each phase are recorded in [docs/build-log.md](docs/bu
 | [ERD](docs/erd.md) | Database tables and relationships |
 | [SQL](sql/) | `schema.sql`, `functions.sql`, `views.sql`, `db_users.sql`, `seed.sql`, `risk_report.sql`, `monthly_summary.sql` |
 | [SQL analytics and the monthly report](docs/sql-analytics.md) | The window function, CTE report and views explained, with the running balance checked by hand |
-| [The web dashboard](docs/dashboard.md) | What each screen does, how it is hosted, and how it is secured |
+| [The web dashboard](docs/dashboard.md) | What each screen does, sign-in and roles, sorting and filtering, how it is hosted and secured |
 | [Testing and CI/CD](docs/testing.md) | The three test layers, fixtures, what each file covers, the CI pipeline |
 | [Monitoring](docs/monitoring.md) | Metrics, alarms and what to do when one fires, dashboard, tracing |
 | [Logs Insights queries](docs/logs-insights-queries.md) | Ready-made queries for the structured logs |
@@ -72,7 +74,7 @@ tests/unit/          Fast tests that use a fake AWS (moto); run on every push
 tests/integration/   Tests that need a PostgreSQL container; run on develop only
 sql/                 Database schema, seed data, reports, views, functions
 infrastructure/      Scripts and policy files that create the AWS resources
-scripts/             Operational scripts (end-to-end test, DLQ redrive, RDS stop/start)
+scripts/             Operational scripts (end-to-end test, DLQ redrive, RDS stop/start, users, diagrams)
 frontend/            The compliance dashboard (HTML, CSS, JavaScript)
 data/                Sample transaction CSV files
 docs/                Design documents, diagrams and evidence screenshots
@@ -102,7 +104,7 @@ docker compose down
 
 Without a database those tests are skipped, not failed.
 
-There are 889 tests (709 unit, 180 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
+There are 1,154 tests (931 unit, 223 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
 
 ## Deploy to AWS
 
@@ -200,12 +202,12 @@ python scripts/run_sql.py sql/db_users.sql               # refresh database perm
 python scripts/verify_scoring_api.py                     # upload a file and check everything through the API
 ```
 
-To call the API yourself:
+To call the API yourself (since Week 15 Day 2 every route except `/health` also needs a signed-in person; `api_env.sh` signs in as the automation user and sets `$ID_TOKEN`):
 
 ```bash
 source ./scripts/api_env.sh
-curl -s -H "x-api-key: $API_KEY" "$API_URL/transactions?account_id=ACC-1007&risk_level=HIGH" | python3 -m json.tool
-curl -s -H "x-api-key: $API_KEY" "$API_URL/insights" | python3 -m json.tool
+curl -s -H "x-api-key: $API_KEY" -H "Authorization: $ID_TOKEN" "$API_URL/transactions?account_id=ACC-1007&risk_level=HIGH" | python3 -m json.tool
+curl -s -H "x-api-key: $API_KEY" -H "Authorization: $ID_TOKEN" "$API_URL/insights" | python3 -m json.tool
 ```
 
 ### Step 6: write API and alert emails (Week 14 Day 1)
@@ -228,10 +230,10 @@ To use the write routes yourself:
 
 ```bash
 source ./scripts/api_env.sh
-curl -s -X POST -H "x-api-key: $API_KEY" -H "Content-Type: text/csv" \
+curl -s -X POST -H "x-api-key: $API_KEY" -H "Authorization: $ID_TOKEN" -H "Content-Type: text/csv" \
      --data-binary @data/sample_transactions_mixed.csv "$API_URL/upload?filename=mixed.csv" | python3 -m json.tool
-curl -s -H "x-api-key: $API_KEY" "$API_URL/alerts?status=OPEN" | python3 -m json.tool
-curl -s -X POST -H "x-api-key: $API_KEY" -H "Content-Type: application/json" \
+curl -s -H "x-api-key: $API_KEY" -H "Authorization: $ID_TOKEN" "$API_URL/alerts?status=OPEN&sort=amount_desc" | python3 -m json.tool
+curl -s -X POST -H "x-api-key: $API_KEY" -H "Authorization: $ID_TOKEN" -H "Content-Type: application/json" \
      -d '{"account_id": "ACC-1007", "reason": "Repeated high-value cross-border payments"}' "$API_URL/flag" | python3 -m json.tool
 ```
 
@@ -279,14 +281,10 @@ The database must be running. The first run takes 5 to 15 minutes while CloudFro
 
 ```bash
 ./infrastructure/frontend/deploy_frontend.sh             # private bucket, CloudFront, files, CORS, API redeploy
-python scripts/verify_dashboard.py                       # hosting, security headers and CORS checks
+python scripts/verify_dashboard.py                       # hosting, security headers, CORS and chart data checks
 ```
 
-The script prints the dashboard's address. To sign in, copy the API key without showing it on screen:
-
-```bash
-source ./scripts/api_env.sh && printf '%s' "$API_KEY" | pbcopy
-```
+The script prints the dashboard's address. Sign-in is added in Step 11.
 
 After changing a file in `frontend/`, run `deploy_frontend.sh` again.
 
@@ -300,6 +298,49 @@ python scripts/e2e_test.py                               # the whole system, inc
 ```
 
 `python scripts/e2e_test.py --skip-dlq` is a 2-minute version that needs no tunnel.
+
+### Step 11: secure sign-in, roles and sessions (Week 15 Day 2)
+
+The database must be running and the tunnel open in a second terminal window. `ALERT_EMAIL` is the same address as in Step 1.
+
+```bash
+python scripts/run_sql.py sql/migrations/w15d2_flagged_by.sql sql/functions.sql sql/db_users.sql   # who flagged an account
+./infrastructure/dynamodb/deploy_table.sh                # adds the sign-in session table
+./infrastructure/iam/apply_data_policies.sh              # query role: the session table only
+for f in ingest score alert report query; do ./infrastructure/lambda/deploy_function.sh $f; done
+./infrastructure/cognito/deploy_auth.sh                  # user pool, MFA, two roles, sign-in pages, automation user
+./infrastructure/apigateway/deploy_api.sh                # Cognito sign-in on every route except /health
+python scripts/manage_users.py create --username n.hlongwane --name "Nolwazi Hlongwane" \
+    --email "$ALERT_EMAIL" --role compliance-officer     # your own account: the invitation is emailed
+./infrastructure/frontend/deploy_frontend.sh             # the dashboard with sign-in, themes, sorting and filtering
+./infrastructure/monitoring/deploy_monitoring.sh         # two new saved queries: who did what, refused requests
+python scripts/verify_auth.py                            # sign-in settings, then sign in, use, sign out, token refused
+python scripts/verify_dashboard.py
+```
+
+Open the dashboard, sign in with the username and the temporary password from the invitation email, choose your own password, and scan the QR code with an authenticator app (Microsoft Authenticator or Google Authenticator). After that, every sign-in asks for the 6-digit code.
+
+To give a colleague access, or take it away (the example is an analyst, Thabo Nkosi):
+
+```bash
+python scripts/manage_users.py create --username t.nkosi --name "Thabo Nkosi" \
+    --email thabo.nkosi@fintrust.example --role compliance-analyst
+python scripts/manage_users.py list
+python scripts/manage_users.py set-role --username t.nkosi --role compliance-officer
+python scripts/manage_users.py end-sessions --username t.nkosi    # signed out everywhere, at once
+python scripts/manage_users.py disable --username t.nkosi         # cannot sign in again; history kept
+```
+
+## Diagrams
+
+Every diagram is generated from `scripts/build_diagrams.py` (the ERD from the UML class diagram in `docs/erd.md`) and drawn by draw.io with the official AWS icons. To change one, change the generator, not the picture, then:
+
+```bash
+python scripts/build_diagrams.py                         # writes the four .drawio files
+git clone --depth 1 https://github.com/jgraph/drawio.git ../drawio
+python scripts/export_diagrams.py --webapp ../drawio/src/main/webapp   # writes the .svg and .pdf
+pytest tests/unit/test_demo_tools.py                     # checks every picture matches its source
+```
 
 ## Keeping the cost at zero
 

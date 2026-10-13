@@ -7,11 +7,13 @@
 
 ---
 
-## 1. What we are building, in one paragraph
+## 1. What I am building, in one paragraph
 
 A compliance officer uploads a CSV of bank transactions. The system checks every row, sets bad rows aside, scores each good transaction for risk using clear rules, stores it in a relational ledger and a fast-lookup event store, emails compliance when a transaction is high risk, exposes everything through a secure REST API and a small web dashboard, and writes a monthly report. Everything is serverless and sized to stay inside the AWS Free Tier.
 
 ## 2. Architecture
+
+The architecture as planned on 6 October. The deployed design, including the sign-in added in Week 15 Day 2, is drawn in [diagrams/architecture.pdf](diagrams/architecture.pdf) and explained in [architecture.md](architecture.md).
 
 ```mermaid
 flowchart LR
@@ -217,7 +219,7 @@ Distinction is 85 or more, which means the Exceeds level on most criteria. The g
 | # | Risk or decision | Handling |
 |---|---|---|
 | 1 | Four real days for ten brief days | Tests written with each module; nothing optional is started until the checklist is complete. |
-| 2 | A service may be restricted on the credits-only Free plan | We find out on the day each service is first created; if blocked we stop and decide together. |
+| 2 | A service may be restricted on the credits-only Free plan | Checked on the day each service is first created; if one is blocked, I stop, record the alternative in the build log and choose before continuing. |
 | 3 | Git history will show four days, not two weeks | Accepted. Commit dates stay real; commits are small and meaningful. |
 | 4 | RDS is private, so SQL cannot be run from a laptop directly | **Decision for Day 2:** a small private EC2 instance reached through EC2 Instance Connect Endpoint, with no public IP and no open inbound port, used as an SSH tunnel for `psql`. Stopped when not in use. |
 | 5 | "Survive a simulated AZ failure" on single-AZ RDS | Subnets span two AZs; the single-AZ limit and the Multi-AZ production design are documented. |

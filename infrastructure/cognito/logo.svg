@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 56" width="260" height="56" role="img" aria-label="FinTrust risk desk">
+  <rect x="0" y="4" width="48" height="48" rx="9" fill="#0f2e2a"/>
+  <path d="M12 41V23h4.5v18zm9 0V29h4.5v12zm9 0v-7.5h4.5V41z" fill="#c99a45"/>
+  <text x="60" y="33" font-family="Georgia, 'Iowan Old Style', Charter, serif" font-size="26" font-weight="600" fill="#0f2e2a">FinTrust</text>
+  <text x="61" y="50" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-size="12.5" letter-spacing="0.6" fill="#586663">RISK DESK</text>
+</svg>

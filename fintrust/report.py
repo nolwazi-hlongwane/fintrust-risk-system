@@ -33,7 +33,6 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from pathlib import Path
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -50,10 +49,9 @@ SAST = timezone(timedelta(hours=2))            # South Africa has no daylight sa
 MONTH_PATTERN = re.compile(r"^(20[0-9]{2})-(0[1-9]|1[0-2])$")
 KEY_PREFIX = "monthly"
 
-# In Lambda the SQL files sit inside the package (fintrust/sql/); in the
-# repository they are in sql/ at the top level.
-_PACKAGED_SQL = Path(__file__).resolve().parent / "sql"
-SQL_DIR = _PACKAGED_SQL if _PACKAGED_SQL.is_dir() else Path(__file__).resolve().parents[1] / "sql"
+# Where the SQL files are found: inside the package in Lambda, sql/ in the
+# repository (see db.read_sql_file).
+SQL_DIR = db.SQL_DIR
 
 CSV_COLUMNS = [
     "month", "account_id", "transaction_count", "opening_balance", "total_credits", "total_debits",
@@ -157,7 +155,7 @@ def month_bounds(month):
 def load_sql(name):
     """Read one of the project's SQL files, without its final semicolon so it can be wrapped."""
     try:
-        return (SQL_DIR / name).read_text(encoding="utf-8").strip().rstrip(";").rstrip() + "\n"
+        return db.read_sql_file(name)
     except OSError as error:
         raise ReportError(f"SQL file {name} is missing from the package") from error
 

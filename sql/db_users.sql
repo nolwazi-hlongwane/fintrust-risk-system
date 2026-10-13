@@ -52,7 +52,7 @@ GRANT SELECT ON customers, accounts, transactions, risk_events, alerts TO fintru
 GRANT UPDATE (status, resolved_at, resolved_by, resolution_note) ON alerts TO fintrust_query;
 -- It cannot insert risk events or update accounts directly. To flag an account
 -- it may only call the flag_account function (see functions.sql).
-GRANT EXECUTE ON FUNCTION flag_account(VARCHAR, VARCHAR) TO fintrust_query;
+GRANT EXECUTE ON FUNCTION flag_account(VARCHAR, VARCHAR, VARCHAR) TO fintrust_query;
 
 -- report Lambda: read only. It is not given the customers table: the monthly
 -- report identifies accounts by id and never needs a name or contact detail.

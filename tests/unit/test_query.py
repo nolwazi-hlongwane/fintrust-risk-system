@@ -12,6 +12,7 @@ import pytest
 
 from fintrust import db, dynamo, query
 from fintrust.models import RiskScore, RuleHit
+from tests.conftest import signed_in
 
 
 class Context:
@@ -24,7 +25,7 @@ def api_event(method="GET", resource="/health", params=None, path=None):
         "resource": resource,
         "queryStringParameters": params,
         "pathParameters": path,
-        "requestContext": {"requestId": "api-request-id"},
+        "requestContext": signed_in("api-request-id"),
     }
 
 
@@ -127,7 +128,7 @@ class TestTransactionsValidation:
     @pytest.mark.parametrize(
         "params, message",
         [
-            ({"account_id": "1007"}, "account_id must look like ACC-1234"),
+            ({"account_id": "AC-1007"}, "account_id must look like ACC-1234"),
             ({"account_id": "ACC-1007' OR '1'='1"}, "account_id must look like ACC-1234"),
             ({"transaction_id": "x; DROP TABLE"}, "transaction_id is not in a valid format"),
             ({"risk_level": "CRITICAL"}, "risk_level must be one of LOW, MEDIUM, HIGH"),
@@ -149,7 +150,8 @@ class TestTransactionsValidation:
     def test_no_parameters_uses_defaults(self, cursor):
         status, body, _ = call("GET", "/transactions")
         assert status == 200
-        assert body == {"items": [], "pagination": {"limit": 25, "offset": 0, "total": 0, "has_more": False}}
+        assert body == {"items": [], "sort": "newest",
+                        "pagination": {"limit": 25, "offset": 0, "total": 0, "has_more": False}}
 
     def test_values_are_passed_as_parameters_never_in_the_sql_text(self, cursor):
         call("GET", "/transactions", {"account_id": "acc-1007", "risk_level": "high", "limit": "10", "offset": "20"})

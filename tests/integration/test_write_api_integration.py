@@ -8,6 +8,7 @@ from psycopg2 import errors
 
 from fintrust import db, query
 from fintrust.db import DatabaseError
+from tests.conftest import OFFICER_CLAIMS, signed_in
 
 pytestmark = pytest.mark.integration
 
@@ -16,11 +17,14 @@ class Context:
     aws_request_id = "test-request-id"
 
 
-def call(method, resource, body=None, params=None):
+SECOND_OFFICER = {**OFFICER_CLAIMS, "cognito:username": "s.pillay", "origin_jti": "second-officer-session"}
+
+
+def call(method, resource, body=None, params=None, claims=None):
     response = query.handler(
         {"httpMethod": method, "resource": resource, "queryStringParameters": params, "pathParameters": None,
          "body": json.dumps(body) if body is not None else None, "isBase64Encoded": False,
-         "requestContext": {"requestId": "api-request-id"}},
+         "requestContext": signed_in("api-request-id", claims)},
         Context(),
     )
     return response["statusCode"], json.loads(response["body"])
@@ -53,27 +57,46 @@ class TestFlagAccountFunction:
     """sql/functions.sql, called directly as the admin user."""
 
     def test_inserts_the_event_and_updates_the_status_together(self, ledger):
-        event_id = rows(ledger, "SELECT flag_account('ACC-1001', 'Unusual pattern')")[0][0]
+        event_id = rows(ledger, "SELECT flag_account('ACC-1001', 'Unusual pattern', 't.nkosi')")[0][0]
         assert rows(ledger, "SELECT status FROM accounts WHERE account_id = 'ACC-1001'") == [("FLAGGED",)]
-        assert rows(ledger, "SELECT account_id, transaction_id, event_type, points, reason FROM risk_events "
+        assert rows(ledger, "SELECT account_id, transaction_id, event_type, points, reason, flagged_by FROM risk_events "
                             "WHERE risk_event_id = %s", (event_id,)) == [
-            ("ACC-1001", None, "MANUAL_FLAG", 0, "Unusual pattern")]
+            ("ACC-1001", None, "MANUAL_FLAG", 0, "Unusual pattern", "t.nkosi")]
+
+    @pytest.mark.parametrize("who", ["NULL", "''", "'   '"])
+    def test_the_person_flagging_is_required(self, ledger, who):
+        with pytest.raises(errors.CheckViolation, match="name of the person flagging"):
+            rows(ledger, f"SELECT flag_account('ACC-1001', 'Unusual pattern', {who})")
+        assert rows(ledger, "SELECT status FROM accounts WHERE account_id = 'ACC-1001'") == [("ACTIVE",)]
+
+    def test_the_old_two_argument_version_no_longer_exists(self, ledger):
+        with pytest.raises(errors.UndefinedFunction):
+            rows(ledger, "SELECT flag_account('ACC-1001', 'no name recorded')")
+
+    def test_only_a_manual_flag_may_name_a_person(self, ledger):
+        with pytest.raises(errors.CheckViolation, match="ck_risk_events_flagged_by"):
+            with ledger.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO risk_events (account_id, transaction_id, event_type, points, reason, flagged_by) "
+                    "SELECT t.account_id, t.transaction_id, 'HIGH_VELOCITY', 30, 'x', 't.nkosi' FROM transactions t "
+                    "WHERE NOT EXISTS (SELECT 1 FROM risk_events e WHERE e.transaction_id = t.transaction_id "
+                    "AND e.event_type = 'HIGH_VELOCITY') LIMIT 1")
 
     def test_unknown_account_raises_and_changes_nothing(self, ledger):
         before = rows(ledger, "SELECT count(*) FROM risk_events")
         with pytest.raises(errors.NoDataFound, match="Account ACC-0000 does not exist"):
-            rows(ledger, "SELECT flag_account('ACC-0000', 'x')")
+            rows(ledger, "SELECT flag_account('ACC-0000', 'x', 't.nkosi')")
         assert rows(ledger, "SELECT count(*) FROM risk_events") == before
 
     def test_closed_account_cannot_be_flagged(self, ledger):
         with pytest.raises(errors.ObjectNotInPrerequisiteState, match="is closed"):
-            rows(ledger, "SELECT flag_account('ACC-1012', 'x')")
+            rows(ledger, "SELECT flag_account('ACC-1012', 'x', 't.nkosi')")
         assert rows(ledger, "SELECT status FROM accounts WHERE account_id = 'ACC-1012'") == [("CLOSED",)]
 
     @pytest.mark.parametrize("reason", ["NULL", "''", "'   '"])
     def test_a_reason_is_required(self, ledger, reason):
         with pytest.raises(errors.CheckViolation, match="reason is required"):
-            rows(ledger, f"SELECT flag_account('ACC-1001', {reason})")
+            rows(ledger, f"SELECT flag_account('ACC-1001', {reason}, 't.nkosi')")
         assert rows(ledger, "SELECT status FROM accounts WHERE account_id = 'ACC-1001'") == [("ACTIVE",)]
 
     def test_is_atomic_if_the_status_update_fails_the_event_is_not_kept(self, ledger):
@@ -83,7 +106,7 @@ class TestFlagAccountFunction:
             cursor.execute("ALTER TABLE accounts ADD CONSTRAINT test_no_flag CHECK (status <> 'FLAGGED') NOT VALID")
         try:
             with pytest.raises(errors.CheckViolation):
-                rows(ledger, "SELECT flag_account('ACC-1001', 'will fail part-way')")
+                rows(ledger, "SELECT flag_account('ACC-1001', 'will fail part-way', 't.nkosi')")
             assert rows(ledger, "SELECT count(*) FROM risk_events") == before
             assert rows(ledger, "SELECT status FROM accounts WHERE account_id = 'ACC-1001'") == [("ACTIVE",)]
         finally:
@@ -91,11 +114,11 @@ class TestFlagAccountFunction:
                 cursor.execute("ALTER TABLE accounts DROP CONSTRAINT test_no_flag")
 
     def test_flagging_twice_keeps_both_reasons(self, ledger):
-        rows(ledger, "SELECT flag_account('ACC-1001', 'first')")
-        rows(ledger, "SELECT flag_account('ACC-1001', 'second')")
-        reasons = rows(ledger, "SELECT reason FROM risk_events WHERE account_id = 'ACC-1001' "
+        rows(ledger, "SELECT flag_account('ACC-1001', 'first', 't.nkosi')")
+        rows(ledger, "SELECT flag_account('ACC-1001', 'second', 'l.dube')")
+        reasons = rows(ledger, "SELECT reason, flagged_by FROM risk_events WHERE account_id = 'ACC-1001' "
                                "AND event_type = 'MANUAL_FLAG' ORDER BY risk_event_id")
-        assert reasons == [("first",), ("second",)]
+        assert reasons == [("first", "t.nkosi"), ("second", "l.dube")]
 
     def test_the_public_cannot_execute_it(self, ledger):
         acl = rows(ledger, "SELECT proacl::text FROM pg_proc WHERE proname = 'flag_account'")[0][0]
@@ -113,8 +136,9 @@ class TestFlagRoute:
         assert status == 201
         assert body["account_id"] == "ACC-1004" and body["account_status"] == "FLAGGED"
         assert rows(ledger, "SELECT status FROM accounts WHERE account_id = 'ACC-1004'") == [("FLAGGED",)]
-        assert rows(ledger, "SELECT reason FROM risk_events WHERE risk_event_id = %s",
-                    (body["risk_event_id"],)) == [("Three large payments in a week",)]
+        assert body["flagged_by"] == "t.nkosi"
+        assert rows(ledger, "SELECT reason, flagged_by FROM risk_events WHERE risk_event_id = %s",
+                    (body["risk_event_id"],)) == [("Three large payments in a week", "t.nkosi")]
 
     def test_unknown_account_is_404(self, ledger):
         status, body = call("POST", "/flag", {"account_id": "ACC-0000", "reason": "x"})
@@ -139,7 +163,7 @@ class TestFlagRoute:
         for user in ("fintrust_score", "fintrust_report"):
             as_db_user(user)
             with pytest.raises(DatabaseError, match="permission denied for function flag_account"):
-                db.fetch_one("SELECT flag_account('ACC-1004', 'x')")
+                db.fetch_one("SELECT flag_account('ACC-1004', 'x', 't.nkosi')")
 
 
 class TestAlertsAndResolve:
@@ -166,25 +190,25 @@ class TestAlertsAndResolve:
 
     def test_resolve_an_open_alert(self, ledger):
         alert_id = call("GET", "/alerts", params={"status": "OPEN"})[1]["items"][0]["alert_id"]
-        status, body = call("POST", "/resolve", {"alert_id": alert_id, "resolved_by": "n.hlongwane",
+        status, body = call("POST", "/resolve", {"alert_id": alert_id,
                                                  "resolution_note": "Supporting documents checked"})
         assert status == 200
-        assert body["alert_id"] == alert_id and body["status"] == "RESOLVED" and body["resolved_by"] == "n.hlongwane"
+        assert body["alert_id"] == alert_id and body["status"] == "RESOLVED" and body["resolved_by"] == "t.nkosi"
         assert rows(ledger, "SELECT status, resolved_by, resolution_note, resolved_at IS NOT NULL FROM alerts "
                             "WHERE alert_id = %s", (alert_id,)) == [
-            ("RESOLVED", "n.hlongwane", "Supporting documents checked", True)]
+            ("RESOLVED", "t.nkosi", "Supporting documents checked", True)]
         assert call("GET", "/alerts", params={"status": "OPEN"})[1]["pagination"]["total"] == 2
         assert call("GET", "/insights")[1]["open_alerts"] == 2
 
     def test_resolving_twice_is_409_and_keeps_the_first_resolution(self, ledger):
         alert_id = call("GET", "/alerts", params={"status": "OPEN"})[1]["items"][0]["alert_id"]
-        assert call("POST", "/resolve", {"alert_id": alert_id, "resolved_by": "first.officer"})[0] == 200
-        status, body = call("POST", "/resolve", {"alert_id": alert_id, "resolved_by": "second.officer"})
+        assert call("POST", "/resolve", {"alert_id": alert_id})[0] == 200
+        status, body = call("POST", "/resolve", {"alert_id": alert_id}, claims=SECOND_OFFICER)
         assert status == 409 and body["error"]["message"] == f"Alert {alert_id} is already resolved"
-        assert rows(ledger, "SELECT resolved_by FROM alerts WHERE alert_id = %s", (alert_id,)) == [("first.officer",)]
+        assert rows(ledger, "SELECT resolved_by FROM alerts WHERE alert_id = %s", (alert_id,)) == [("t.nkosi",)]
 
     def test_unknown_alert_is_404(self, ledger):
-        assert call("POST", "/resolve", {"alert_id": 999999, "resolved_by": "n.hlongwane"})[0] == 404
+        assert call("POST", "/resolve", {"alert_id": 999999})[0] == 404
 
     def test_resolve_cannot_change_which_transaction_an_alert_is_for(self, ledger):
         with pytest.raises(DatabaseError, match="permission denied"):
@@ -203,5 +227,6 @@ def test_schema_functions_and_users_can_be_dropped_and_rebuilt(admin):
             cursor.execute((SQL_DIR / name).read_text())
         cursor.execute("SELECT count(*) FROM transactions")
         assert cursor.fetchone()[0] == before == 275
-        cursor.execute("SELECT has_function_privilege('fintrust_query', 'flag_account(varchar, varchar)', 'EXECUTE')")
+        cursor.execute("SELECT has_function_privilege('fintrust_query', 'flag_account(varchar, varchar, varchar)', "
+                       "'EXECUTE')")
         assert cursor.fetchone()[0] is True

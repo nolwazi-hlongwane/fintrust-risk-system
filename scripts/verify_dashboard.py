@@ -4,12 +4,14 @@
 
 The database must be running (./scripts/rds_start.sh).
 
-It checks three things:
+It checks four things:
     * hosting: the bucket is private, only CloudFront can read it, and the site
       is served over HTTPS with security headers
     * browser access (CORS): the API answers the dashboard's address and no other
     * the two things the dashboard needs that are new: GET /accounts, and a
       rule breakdown for transactions loaded as opening data
+    * the chart routes (Week 15 Day 1): GET /insights/trends and
+      GET /accounts/{account_id}/balance, reconciled with GET /insights
 
 It changes nothing.
 """
@@ -21,11 +23,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from api_auth import headers_for
 from botocore.exceptions import ClientError
 from verify_write_api_alerts import PREFIX, REGION, TLS, account_id, api_settings, check, parameter, results, session
 
 BUCKET = f"{PREFIX}-dashboard-{account_id}"
-FILES = ("index.html", "styles.css", "app.js", "config.js", "favicon.svg")
+FILES = ("index.html", "styles.css", "theme.js", "auth.js", "charts.js", "app.js", "config.js", "favicon.svg")
 OTHER_SITE = "https://evil.example"
 
 s3 = session.client("s3")
@@ -97,15 +100,20 @@ def verify_hosting(dashboard_url, api_url):
     check("every file the page needs is served", all(result[0] == 200 for result in loaded.values()),
           ", ".join(f"{name} {result[0]}" for name, result in loaded.items()))
     check("config.js points at this project's API", api_url in loaded["config.js"][2])
+    sign_in_url = parameter("cognito_domain")
+    check("config.js points at this project's sign-in (Cognito managed login) and app client",
+          sign_in_url in loaded["config.js"][2] and parameter("cognito_client_id") in loaded["config.js"][2])
     _, key = api_settings()
-    check("the API key is not in any file served to the browser",
-          not any(key in result[2] for result in loaded.values()))
+    check("the scripts' API key is not in any file served to the browser (the dashboard has its own)",
+          not any(key.api_key in result[2] for result in loaded.values()))
+    check("no token or password is in any file served to the browser",
+          not any(marker in result[2] for result in loaded.values() for marker in ("eyJ", "password\":")))
 
     api_origin = "/".join(api_url.split("/")[:3])
     csp = headers.get("content-security-policy", "")
-    check("Content-Security-Policy: only the page's own script, and only this API",
-          "script-src 'self'" in csp and f"connect-src {api_origin}" in csp and "default-src 'none'" in csp
-          and "unsafe-inline" not in csp)
+    check("Content-Security-Policy: only the page's own script, and only this API and its sign-in",
+          "script-src 'self'" in csp and f"connect-src {api_origin} {sign_in_url}" in csp
+          and "default-src 'none'" in csp and "unsafe-inline" not in csp)
     check("the page cannot be framed by another site, and HTTPS is enforced by the browser",
           headers.get("x-frame-options") == "DENY" and "max-age=" in headers.get("strict-transport-security", "")
           and headers.get("x-content-type-options") == "nosniff")
@@ -117,16 +125,18 @@ def verify_cors(dashboard_url, api_url, key):
           parameter("cors_allowed_origin") == dashboard_url, parameter("cors_allowed_origin"))
 
     status, headers, _ = fetch(api_url + "/transactions", "OPTIONS", {
-        "Origin": dashboard_url, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "x-api-key"})
-    check("the browser's preflight check from the dashboard is allowed",
+        "Origin": dashboard_url, "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization,x-api-key"})
+    allowed_headers = headers.get("access-control-allow-headers", "")
+    check("the browser's preflight check from the dashboard is allowed, with the sign-in header",
           status == 204 and headers.get("access-control-allow-origin") == dashboard_url
-          and "x-api-key" in headers.get("access-control-allow-headers", ""), f"HTTP {status}")
+          and "x-api-key" in allowed_headers and "authorization" in allowed_headers, f"HTTP {status}")
 
-    status, headers, _ = fetch(api_url + "/health", headers={"Origin": dashboard_url, "x-api-key": key})
+    status, headers, _ = fetch(api_url + "/health", headers={"Origin": dashboard_url, **headers_for(key)})
     check("a request from the dashboard is answered for the dashboard",
           status == 200 and headers.get("access-control-allow-origin") == dashboard_url, f"HTTP {status}")
 
-    status, headers, _ = fetch(api_url + "/health", headers={"Origin": OTHER_SITE, "x-api-key": key})
+    status, headers, _ = fetch(api_url + "/health", headers={"Origin": OTHER_SITE, **headers_for(key)})
     allowed = headers.get("access-control-allow-origin", "")
     check("a request from another website is not given permission to read the answer",
           allowed == dashboard_url and OTHER_SITE not in allowed and allowed != "*", allowed)
@@ -139,7 +149,7 @@ def verify_cors(dashboard_url, api_url, key):
 
 def verify_new_routes(api_url, key):
     print("\nWhat the dashboard reads")
-    status, _, body = fetch(api_url + "/accounts?limit=100", headers={"x-api-key": key})
+    status, _, body = fetch(api_url + "/accounts?limit=100", headers=headers_for(key))
     accounts = json.loads(body).get("items", []) if status == 200 else []
     points = [item["total_risk_points"] for item in accounts]
     check("GET /accounts lists every account, highest risk first",
@@ -147,7 +157,7 @@ def verify_new_routes(api_url, key):
     check("the accounts list holds no customer names or contact details",
           bool(accounts) and not {"customer_id", "full_name", "email", "phone_number"} & set(accounts[0]))
 
-    status, _, body = fetch(api_url + "/transactions/TXN-20260915-000225/journey", headers={"x-api-key": key})
+    status, _, body = fetch(api_url + "/transactions/TXN-20260915-000225/journey", headers=headers_for(key))
     journey = json.loads(body) if status == 200 else {}
     score = journey.get("score") or {}
     rules = score.get("rules", [])
@@ -155,6 +165,57 @@ def verify_new_routes(api_url, key):
           journey.get("source") == "ledger" and score.get("risk_score") == 70
           and sum(rule["points"] for rule in rules) == 70,
           ", ".join(f"{rule['rule']} +{rule['points']}" for rule in rules))
+
+
+def verify_chart_routes(api_url, key):
+    """Week 15 Day 1: the two routes behind the Overview charts, reconciled with GET /insights."""
+    from decimal import Decimal
+
+    print("\nThe chart data (Week 15 Day 1)")
+
+    def get(path):
+        status, _, body = fetch(api_url + path, headers=headers_for(key))
+        return status, (json.loads(body) if status in (200, 404) else {})
+
+    status, insights = get("/insights")
+    status_trends, trends = get("/insights/trends")
+    check("GET /insights/trends answers", status_trends == 200, f"HTTP {status_trends}")
+    if status != 200 or status_trends != 200:
+        return
+    activity = trends["activity"]
+    check("the activity chart adds up to the Overview's transaction count",
+          sum(row["transactions"] for row in activity) == insights["totals"]["transactions"],
+          f"{sum(row['transactions'] for row in activity)} vs {insights['totals']['transactions']}")
+    check("the activity chart's Low, Medium and High add up to the Risk levels figures",
+          all(sum(row[level.lower()] for row in activity) == insights["by_risk_level"][level]
+              for level in ("LOW", "MEDIUM", "HIGH")))
+    check("the activity chart's value adds up to the Total value figure",
+          sum(Decimal(str(row["total_value"])) for row in activity) == Decimal(insights["totals"]["total_value"]))
+    buckets = trends["score_distribution"]["buckets"]
+    check("every transaction is in exactly one bar of the score chart",
+          sum(b["low"] + b["medium"] + b["high"] for b in buckets) == insights["totals"]["transactions"])
+    flow = trends["alert_flow"]
+    check("the alert chart's bars add up to its totals",
+          sum(p["raised"] for p in flow["periods"]) == flow["raised"]
+          and sum(p["resolved"] for p in flow["periods"]) == flow["resolved"], f"{flow['raised']} raised")
+    ranking = trends["account_ranking"]["items"]
+    check("the ranking is in rank order with percentiles between 0 and 1",
+          bool(ranking) and [r["fraud_rank"] for r in ranking] == sorted(r["fraud_rank"] for r in ranking)
+          and all(0 <= Decimal(r["fraud_percentile"]) <= 1 for r in ranking))
+    bursts = [r["account_id"] for r in ranking if r["burst_detected"]]
+    check("the 30-day burst rule marks at least one account (ACC-1007 in the seed data)", "ACC-1007" in bursts,
+          ", ".join(bursts))
+
+    status, balance = get("/accounts/ACC-1007/balance")
+    summary = balance.get("summary") or {}
+    check("GET /accounts/{account_id}/balance answers for ACC-1007", status == 200 and bool(balance.get("points")),
+          f"HTTP {status}")
+    if summary:
+        check("its balance adds up: opening + money in - money out = closing",
+              Decimal(summary["opening_balance"]) + Decimal(summary["credits"]) - Decimal(summary["debits"])
+              == Decimal(summary["closing_balance"]), summary["closing_balance"])
+    status, _ = get("/accounts/ACC-9999/balance")
+    check("an account that does not exist is a 404", status == 404, f"HTTP {status}")
 
 
 def main():
@@ -168,13 +229,14 @@ def main():
         api_url, key = api_settings()
         print(f"\nDashboard: {dashboard_url}\nAPI:       {api_url}")
         verify_hosting(dashboard_url, api_url)
-        status, _, body = fetch(api_url + "/health", headers={"x-api-key": key})
+        status, _, body = fetch(api_url + "/health", headers=headers_for(key))
         if status != 200:
             check("the API can reach the database", False, f"HTTP {status} {body[:80]}")
             print("\nStopping: is the database running?  ./scripts/rds_start.sh")
         else:
             verify_cors(dashboard_url, api_url, key)
             verify_new_routes(api_url, key)
+            verify_chart_routes(api_url, key)
     except ClientError as error:
         print(f"\nStopped: AWS returned an error: {error}", file=sys.stderr)
         return 1

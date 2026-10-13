@@ -10,6 +10,7 @@ pythonpath = ["."]
 addopts = "-ra"
 markers = [
     "integration: needs moto plus a PostgreSQL container; runs in CI on the develop branch only",
+    "real_sessions: use the real DynamoDB session check instead of the always-open stand-in",
 ]
 
 [tool.ruff]
