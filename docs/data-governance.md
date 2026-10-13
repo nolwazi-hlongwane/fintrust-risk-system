@@ -33,12 +33,23 @@ The Protection of Personal Information Act (POPIA) protects information that ide
 
 Directly identifying fields (`full_name`, `email`, `phone_number`) exist only in the `customers` table.
 
+### Staff sign-in data (Week 15 Day 2)
+
+Signing in creates personal information about **staff**, not customers. It is classified and limited in the same way.
+
+| Data | Where | Classification | Kept for |
+|---|---|---|---|
+| Staff name, work email, username, password hash, MFA secret | Amazon Cognito user pool | Personal (direct, staff) | While the person has access; disabled, not deleted, when they leave, so the audit trail still resolves |
+| Session record: username, display name, role, sign-in times, browser | DynamoDB `fintrust-capstone-sessions` | Personal (staff activity) | 90 days, then deleted by time-to-live |
+| `resolved_by`, `flagged_by` | RDS `alerts`, `risk_events` | Internal: a username, never a name or email | With the record it belongs to |
+| Actor on each API log line | CloudWatch Logs | Internal: a username | 30 days |
+
 ### How it is stored, who can access it
 
 | Question | Answer |
 |---|---|
 | How is it stored? | RDS PostgreSQL in private subnets with storage encryption; S3 and SQS encrypted with a customer-managed KMS key; DynamoDB encrypted at rest by default; TLS on every connection |
-| Who can access it? | Compliance staff, through the API with an API key. Each Lambda only through its own least-privilege role and its own database user. No direct database access from the internet |
+| Who can access it? | Named compliance staff, each signed in with their own Cognito account and MFA, through the API (which also needs the application's API key). Officers may resolve alerts and flag accounts; analysts may only read and upload. Each Lambda only through its own least-privilege role and its own database user. No direct database access from the internet |
 | What leaves the system? | Alert emails carry the transaction id, a masked account id, the score and the rules. No names or contact details |
 | How long is it kept? | See section 3 |
 
@@ -49,7 +60,8 @@ Directly identifying fields (`full_name`, `email`, `phone_number`) exist only in
 | Purpose specification | Data is processed only to monitor transaction risk, a regulatory duty |
 | Minimality | The CSV carries account ids, not customer names; the event store holds no direct identifiers |
 | Information quality | Row-level validation and quarantine (section 2) |
-| Security safeguards (section 19) | Encryption, least privilege, private networking, logging |
+| Security safeguards (section 19) | Encryption, least privilege, private networking, logging; each person signs in with MFA, sessions end after 15 idle minutes, and access is removed at once when someone leaves |
+| Accountability (section 8) | Every decision that changes the record (resolving an alert, flagging an account) is stored with the username of the signed-in officer, taken from their sign-in, not typed in |
 | Retention limits (section 14) | Lifecycle policy with fixed periods (section 3) |
 | Cross-border transfer (section 72) | Data is hosted in the AWS Stockholm region. Sweden applies the EU GDPR, which gives protection substantially similar to POPIA. A production deployment for a South African bank would use the Cape Town region (af-south-1) to keep data in the country |
 
@@ -103,6 +115,7 @@ How it is enforced:
 - **Quarantine bucket:** 90 days, long enough to correct and resubmit, short enough not to keep faulty personal data.
 - **CloudWatch Logs:** 30 days. Logs carry identifiers only.
 - **DynamoDB events:** 12 months, removed with a time-to-live attribute.
+- **DynamoDB sessions:** 90 days, removed with a time-to-live attribute: long enough to answer "who was signed in when?", no longer.
 - **RDS:** rows older than 12 months are exported to S3 and then deleted (documented procedure; not automated in the capstone).
 
 ---
