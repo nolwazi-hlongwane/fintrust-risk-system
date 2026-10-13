@@ -196,7 +196,7 @@ python3 "$ROOT/scripts/manage_users.py" automation
 echo
 echo "Sign-in is ready:  $SIGN_IN_URL"
 echo "Next:"
-echo "  1. Create your own account (an invitation with a temporary password is emailed to you):"
-echo "       python scripts/manage_users.py create --username <name> --name \"<Full Name>\" --email <address> --role compliance-officer"
+echo "  1. Create your own account (an invitation with a temporary password is emailed to you)."
+echo "     The options are listed by:  python scripts/manage_users.py create --help  (README, Step 11, has an example)"
 echo "  2. Publish the API and the dashboard with sign-in switched on:"
 echo "       ./infrastructure/apigateway/deploy_api.sh && ./infrastructure/frontend/deploy_frontend.sh"

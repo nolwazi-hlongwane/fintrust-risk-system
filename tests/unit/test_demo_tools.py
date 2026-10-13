@@ -135,6 +135,15 @@ class TestOnboardAccount:
         assert cursor.execute.call_count == 1
 
 
+class TestOnboardedCustomerDetails:
+    def test_fictional_details_are_stable_and_can_never_reach_a_real_person(self):
+        name, email, phone = onboard_account.customer_details("9001")
+        assert onboard_account.customer_details("9001") == (name, email, phone)   # same every rehearsal
+        assert email.endswith("@example.com") and " 555 " in phone                # reserved for fiction
+        assert len(name) <= 120 and len(email) <= 254 and len(phone) <= 20        # the column limits
+        assert "demo" not in (name + email).lower()
+
+
 class TestDiagrams:
     DIAGRAMS = ROOT / "docs" / "diagrams"
     NAMES = ["architecture", "erd", "pipeline-sequence", "sign-in-sequence"]
