@@ -195,6 +195,26 @@ class TestOverviewLayout:
         assert SCRIPT.count("numbers([") == 4          # activity, scores, alerts and balance; the ranking is a list already
 
 
+class TestResultsTables:
+    """Week 15 Day 2: results tables fit the screen on a laptop and become cards on a phone."""
+
+    def test_every_cell_is_labelled_with_its_column_for_the_phone_layout(self):
+        assert '"data-label": c.label' in SCRIPT
+
+    def test_results_tables_become_cards_on_a_phone_but_chart_numbers_stay_tables(self):
+        phone = STYLES[STYLES.index("@media (max-width: 40rem) {\n  .table-wrap.cards"):]
+        assert "content: attr(data-label)" in phone and "grid-template-columns: repeat(2, minmax(0, 1fr))" in phone
+        assert 'table(columns, rows, "Nothing to show.", null, null, { cards: false })' in SCRIPT
+
+    def test_long_text_wraps_instead_of_pushing_the_table_off_the_screen(self):
+        assert re.search(r'label: "Merchant", wrap: true', SCRIPT)
+        assert re.search(r"td\.wrap \{ white-space: normal; min-width: \d+rem; max-width: \d+rem; \}", STYLES)
+
+    def test_open_alerts_do_not_show_an_empty_resolved_by_column(self):
+        assert 'if (status !== "OPEN") {' in SCRIPT
+        assert 'label: "Action"' in SCRIPT
+
+
 class TestAppearance:
     """Light and dark (Week 15 Day 2)."""
 

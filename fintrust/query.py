@@ -1021,6 +1021,7 @@ ALERT_SORTS = {
     "amount_desc": f"t.amount DESC, {_RAISED_NEWEST}",
     "amount_asc": f"t.amount ASC, {_RAISED_NEWEST}",
     "score_desc": f"t.risk_score DESC, {_RAISED_NEWEST}",
+    "score_asc": f"t.risk_score ASC, {_RAISED_NEWEST}",
     "account_asc": f"t.account_id ASC, {_RAISED_NEWEST}",
     "account_desc": f"t.account_id DESC, {_RAISED_NEWEST}",
 }

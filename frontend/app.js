@@ -541,8 +541,11 @@
   /**
    * A table. Columns: {label, cell(row), number, wrap, sort: {asc, desc, first}}.
    * `sorting` = {current, onSort(key)} makes the headers of sortable columns into buttons.
+   * On a phone a results table becomes a stack of cards, one per row, each value
+   * labelled with its column (`data-label`), so nothing is hidden off the side of
+   * the screen. `cards: false` keeps a plain scrolling table (the chart numbers).
    */
-  function table(columns, rows, emptyText, onRowClick, sorting) {
+  function table(columns, rows, emptyText, onRowClick, sorting, { cards = true } = {}) {
     if (!rows.length) return el("div", { class: "table-wrap" }, el("p", { class: "empty", text: emptyText }));
     const head = el("tr", null, columns.map((c) => {
       const classes = c.number ? "number" : null;
@@ -557,7 +560,8 @@
         title: `Sort by ${c.label.toLowerCase()}`, onclick: () => sorting.onSort(next) }, c.label, icon(symbol)));
     }));
     const body = rows.map((row) => {
-      const cells = columns.map((c) => el("td", { class: [c.number ? "number" : "", c.wrap ? "wrap" : ""].join(" ").trim() || null }, c.cell(row)));
+      const cells = columns.map((c) => el("td", { class: [c.number ? "number" : "", c.wrap ? "wrap" : ""].join(" ").trim() || null,
+        "data-label": c.label }, c.cell(row)));
       const line = el("tr", onRowClick ? { class: "clickable", tabindex: "0" } : null, cells);
       if (onRowClick) {
         line.addEventListener("click", (event) => { if (!event.target.closest("button")) onRowClick(row); });
@@ -565,7 +569,7 @@
       }
       return line;
     });
-    return el("div", { class: "table-wrap" }, el("table", null, el("thead", null, head), el("tbody", null, body)));
+    return el("div", { class: cards ? "table-wrap cards" : "table-wrap" }, el("table", null, el("thead", null, head), el("tbody", null, body)));
   }
 
   function pager(pagination, onMove) {
@@ -840,7 +844,7 @@
 
   /** The numbers behind a chart, as a table: the accessible and auditable twin of every picture. */
   function numbers(columns, rows) {
-    return el("details", { class: "numbers" }, el("summary", { text: "Show the numbers" }), table(columns, rows, "Nothing to show."));
+    return el("details", { class: "numbers" }, el("summary", { text: "Show the numbers" }), table(columns, rows, "Nothing to show.", null, null, { cards: false }));
   }
 
   const percent = (fraction) => new Intl.NumberFormat("en-ZA", { style: "percent", maximumFractionDigits: 1 }).format(fraction);
@@ -1218,7 +1222,7 @@
               { label: "Type", cell: (r) => r.tx_type === "CREDIT" ? "Credit" : "Debit" },
               { label: "Amount", number: true, sort: { desc: "amount_desc", asc: "amount_asc" }, cell: (r) => formatMoney(r.amount) },
               { label: "Country", cell: (r) => r.country_code },
-              { label: "Merchant", sort: { asc: "merchant_asc", desc: "merchant_desc", first: "asc" }, cell: (r) => r.merchant_name || "" },
+              { label: "Merchant", wrap: true, sort: { asc: "merchant_asc", desc: "merchant_desc", first: "asc" }, cell: (r) => r.merchant_name || "" },
               { label: "Score", number: true, sort: { desc: "score_desc", asc: "score_asc" }, cell: (r) => r.risk_score },
               { label: "Risk", cell: (r) => riskPill(r.risk_level) },
             ], data.items, "No transactions match these filters.", (row) => openJourney(row.transaction_id, row), sorting),
@@ -1244,7 +1248,7 @@
   const ALERT_SORTS = [
     ["newest", "Newest first"], ["oldest", "Oldest first"],
     ["amount_desc", "Amount: high to low"], ["amount_asc", "Amount: low to high"],
-    ["score_desc", "Risk score: high to low"],
+    ["score_desc", "Risk score: high to low"], ["score_asc", "Risk score: low to high"],
     ["account_asc", "Account: A to Z"], ["account_desc", "Account: Z to A"],
   ];
 
@@ -1282,13 +1286,16 @@
             { label: "Account", sort: { asc: "account_asc", desc: "account_desc", first: "asc" }, cell: (r) => r.account_id },
             { label: "Amount", number: true, sort: { desc: "amount_desc", asc: "amount_asc" }, cell: (r) => formatMoney(r.amount) },
             { label: "Country", cell: (r) => r.country_code },
-            { label: "Score", number: true, sort: { desc: "score_desc" }, cell: (r) => r.risk_score },
+            { label: "Score", number: true, sort: { desc: "score_desc", asc: "score_asc" }, cell: (r) => r.risk_score },
             { label: "Status", cell: (r) => statusPill(r.status) },
-            { label: "Resolved by", wrap: true, cell: (r) => r.resolved_by
-              ? `${r.resolved_by}, ${formatDate(r.resolved_at)}${r.resolution_note ? ": " + r.resolution_note : ""}` : "" },
           ];
-          if (canResolve) {
-            columns.push({ label: "", cell: (r) => r.status === "OPEN"
+          // "Resolved by" is always empty for open alerts, so it is shown only when resolved ones can be listed.
+          if (status !== "OPEN") {
+            columns.push({ label: "Resolved by", wrap: true, cell: (r) => r.resolved_by
+              ? `${r.resolved_by}, ${formatDate(r.resolved_at)}${r.resolution_note ? ": " + r.resolution_note : ""}` : "" });
+          }
+          if (canResolve && status !== "RESOLVED") {
+            columns.push({ label: "Action", cell: (r) => r.status === "OPEN"
               ? el("button", { type: "button", class: "button small", onclick: () => resolveAlert(r, query) }, "Resolve") : "" });
           }
           keepFocus(() => results.replaceChildren(

@@ -661,7 +661,7 @@
             "name": "sort",
             "in": "query",
             "required": false,
-            "description": "newest (default), oldest, amount_desc, amount_asc, score_desc, account_asc or account_desc",
+            "description": "newest (default), oldest, amount_desc, amount_asc, score_desc, score_asc, account_asc or account_desc",
             "schema": {
               "type": "string"
             }
