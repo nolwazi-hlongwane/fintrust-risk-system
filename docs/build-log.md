@@ -877,3 +877,37 @@ The dashboard showed confidential bank data to anyone who had the API key. This 
 | Rubric C5: POPIA | Staff sign-in data classified, kept 90 days, and every decision attributable to a person (accountability) |
 | Rubric C6: architecture diagram, ERD | Redrawn to industry notation (AWS icons and groups; UML), two sequence diagrams added, all generated and tested |
 | Free Tier | Cognito Essentials: 10,000 monthly users free. DynamoDB 15 of 25 read and 25 of 25 write units. No other new cost |
+
+## Week 15 Day 4: Presentation Readiness
+
+**Built on:** Thursday 15 October 2026 (brief slot: Week 15, presentation preparation before the Week 16 presentation)
+**Branch:** `presentation-prep`
+
+A rehearsal of the runbook against the dashboard's code found one step that could not work, and the preparation itself was a list of manual checks. This phase fixes the first and turns the second into one command. No AWS resource, permission or cost is added.
+
+### Corrections
+
+| Found | Correction |
+|---|---|
+| The runbook goes from **Upload a file** to Alerts, Transactions and the Overview, then back to Upload to open the row in the dead-letter queue. Leaving Upload stopped the progress tracking and coming back showed an empty page, and that transaction cannot be found anywhere else because it is not in the ledger | The last upload's table belongs to the session: it is shown again on return, every row is checked once more (so a recovered row shows as scored), and it is forgotten at sign-out. Kept in memory only |
+| The day's readiness depended on remembering a dozen manual checks | `scripts/ready_check.py`: one read-only run that checks the database, tunnel, the five Lambdas, all four queues, alarms, the CloudWatch dashboard, the SES sender, an officer able to sign in, a monthly report in S3, the dashboard over HTTPS, and a 401 for a request with no signed-in person |
+| The 5-minute FIFO deduplication window made the redrive's timing depend on how fast the talk went | The runbook's full-presentation timing uploads the file before the architecture walk-through, so the redrive comes about 8 minutes later |
+
+### Key decisions
+
+1. **Fix the dashboard rather than change the demo.** The dead-letter row is the heart of the resilience story; it must be reachable on screen, not only with `curl`.
+2. **The readiness check changes nothing.** It is run minutes before presenting, so a unit test parses it and fails the build if any AWS call other than a get, describe or list is added, or if it signs in.
+
+### Test results
+
+- `pytest tests/unit`: 939 unit tests passing (5 new for the upload table, 3 for the readiness check). `ruff check .` clean; `node --check` passes on `frontend/app.js`.
+- To verify on the deployed system: deploy the dashboard, then rehearse the runbook once; step 11:00 (Upload, the dead-letter row) is the one this phase fixes.
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Brief, Week 16 format: upload a CSV, show the CloudWatch dashboard while transactions ingest, query the API, show the risk report in S3 | Each is a timed step in the runbook |
+| Assessment Rubric C7: end to end without failure | Prepared by `ready_check.py`; the one broken step is fixed |
+| Presentation Rubric C4: demo pre-staged and verified minutes before | `ready_check.py` 15 minutes before; commands pre-typed |
+| Free Tier | Nothing new deployed |

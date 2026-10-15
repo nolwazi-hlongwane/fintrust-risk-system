@@ -350,3 +350,41 @@ class TestAccessibilityBasics:
 
     def test_the_current_section_is_marked_for_screen_readers(self):
         assert 'tab.setAttribute("aria-current", "page")' in SCRIPT
+
+
+def function_body(name):
+    """The text of one function in app.js, from its declaration to the next top-level function."""
+    start = SCRIPT.index(f"function {name}(")
+    following = re.search(r"\n  (?:async )?function |\n  views\.", SCRIPT[start + 1:])
+    return SCRIPT[start: start + 1 + following.start()] if following else SCRIPT[start:]
+
+
+class TestUploadProgress:
+    """Week 15 Day 4: the progress table of the last upload survives moving between sections.
+
+    In the demonstration the officer uploads, looks at alerts, transactions and charts, then
+    comes back to Upload to open the row that went to the dead-letter queue. Without this the
+    table was empty on return, and that transaction (not in the ledger) could not be opened.
+    """
+
+    def test_the_last_upload_is_remembered_when_its_progress_is_shown(self):
+        assert "state.lastUpload = { accepted, ids, statuses };" in function_body("showTracking")
+
+    def test_the_upload_section_shows_it_again_on_return(self):
+        upload_view = SCRIPT[SCRIPT.index("views.upload = function"): SCRIPT.index("function transactionIds(")]
+        assert "if (state.lastUpload)" in upload_view
+        assert "showTracking(result, accepted, ids, statuses)" in upload_view
+
+    def test_on_return_every_row_is_checked_once_even_if_it_had_finished(self):
+        """A row recovered from the dead-letter queue must show as scored, not as it was."""
+        tracking = function_body("showTracking")
+        assert "let recheckFinished = Boolean(restored);" in tracking
+        assert "if (!recheckFinished && current && FINISHED.includes(current.status)) continue;" in tracking
+        assert "recheckFinished = false;" in tracking
+
+    def test_it_is_forgotten_whenever_the_session_ends(self):
+        assert "state.lastUpload = null;" in function_body("showSignIn")
+        assert "state.lastUpload = null;" in function_body("endSession")
+
+    def test_it_is_held_in_memory_only_never_in_browser_storage(self):
+        assert not re.search(r"Storage\.setItem\([^;]*lastUpload", SCRIPT)

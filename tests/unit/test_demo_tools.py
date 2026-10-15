@@ -246,3 +246,32 @@ class TestDiagrams:
         text = self.labels((self.DIAGRAMS / f"{name}.drawio").read_text(encoding="utf-8"))
         for words in required:
             assert words in text, words
+
+
+class TestReadyCheck:
+    """scripts/ready_check.py is run minutes before presenting, so it must never change anything."""
+
+    SOURCE = (ROOT / "scripts" / "ready_check.py").read_text()
+    CHANGING = ("put_", "create_", "delete_", "start_", "stop_", "send_", "invoke", "update_", "modify_",
+                "receive_", "purge_", "change_", "admin_", "initiate_auth", "respond_to_auth", "sign_in", "set_")
+
+    def called_names(self):
+        tree = ast.parse(self.SOURCE)
+        return {node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+                for node in ast.walk(tree) if isinstance(node, ast.Call)}
+
+    def test_no_call_that_changes_anything(self):
+        offending = {name for name in self.called_names() if name.startswith(self.CHANGING)}
+        assert not offending
+
+    def test_every_aws_call_only_reads(self):
+        clients = {"rds", "ec2", "lambda_client", "sqs", "cloudwatch", "ses", "cognito", "s3", "sts"}
+        aws_calls = {node.func.attr for node in ast.walk(ast.parse(self.SOURCE))
+                     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                     and isinstance(node.func.value, ast.Name) and node.func.value.id in clients}
+        assert aws_calls and all(name.startswith(("get_", "describe_", "list_")) for name in aws_calls)
+
+    def test_it_checks_every_step_the_demonstration_depends_on(self):
+        for needed in ("rds_start.sh", "db_tunnel.sh", "transactions-dlq.fifo", "compliance-officer",
+                       "monthly/", "status == 401", "alert_sender", "-operations"):
+            assert needed in self.SOURCE, needed

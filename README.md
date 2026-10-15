@@ -356,6 +356,7 @@ It is also stopped automatically at 20:00 South African time every day. Everythi
 ## Demonstrating the system
 
 ```bash
+python scripts/ready_check.py         # is everything the demonstration needs ready? changes nothing
 python scripts/make_demo_file.py      # writes a fresh 12-row file and prints what to expect
 ```
 

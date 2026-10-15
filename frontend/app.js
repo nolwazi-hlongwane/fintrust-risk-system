@@ -48,6 +48,7 @@
     session: null,                    // GET /session: who is signed in, role, permissions
     view: null, update: null,         // the view on screen, and how to refresh it in place
     tracker: null,
+    lastUpload: null,                 // the last file uploaded in this session, so its progress survives moving between sections
     balanceAccount: null,             // the account whose running balance is shown
     lastApi: Date.now(), lastActivity: Date.now(), idleTimer: null, warnTimer: null, endingSession: false,
   };
@@ -249,6 +250,7 @@
   function showSignIn(notice) {
     stopIdleWatch();
     stopTracking();
+    state.lastUpload = null;
     closeDrawer();
     closeUserMenu();
     state.session = null;
@@ -312,6 +314,7 @@
     state.endingSession = true;
     stopIdleWatch();
     stopTracking();
+    state.lastUpload = null;
     try {
       window.sessionStorage.setItem(NOTICE, JSON.stringify({
         message: message || NOTICES[reason] || NOTICES.EXPIRED, tone: reason === "SIGNED_OUT" ? "good" : null }));
@@ -1438,6 +1441,12 @@
       el("div", { class: "dropzone" }, chooser, button),
       el("p", { class: "lede section", text: "The first line must name the columns: transaction_id, account_id, tx_date, amount, tx_type, channel and country_code are required. Rows that fail a check are set aside with the reason and are not stored. The file is recorded as uploaded by you." }),
       result);
+    // Coming back to this section: show the last upload again, with every row checked afresh,
+    // so a transaction that has since been recovered from the dead-letter queue shows as scored.
+    if (state.lastUpload) {
+      const { accepted, ids, statuses } = state.lastUpload;
+      showTracking(result, accepted, ids, statuses);
+    }
     return null;
   };
 
@@ -1455,14 +1464,17 @@
     return [...seen];
   }
 
-  function showTracking(container, accepted, ids) {
+  function showTracking(container, accepted, ids, restored) {
     const followed = ids.slice(0, TRACK_LIMIT);
-    const statuses = new Map(followed.map((id) => [id, null]));
+    const statuses = restored || new Map(followed.map((id) => [id, null]));
+    state.lastUpload = { accepted, ids, statuses };
+    let recheckFinished = Boolean(restored);  // a restored table checks even finished rows once
     const body = el("div");
     const note = el("p", { class: "lede" });
     container.replaceChildren(
       el("p", { class: "notice good", role: "status",
-        text: `File accepted and stored as ${accepted.object_key}. Processing has started.` }),
+        text: restored ? `Your last upload in this session, stored as ${accepted.object_key}.`
+          : `File accepted and stored as ${accepted.object_key}. Processing has started.` }),
       el("div", { class: "section" }, el("h2", { text: "Progress" }), note, body));
 
     const draw = () => {
@@ -1492,7 +1504,7 @@
       for (const id of followed) {
         if (tracker.stopped) return;
         const current = statuses.get(id);
-        if (current && FINISHED.includes(current.status)) continue;
+        if (!recheckFinished && current && FINISHED.includes(current.status)) continue;
         try {
           statuses.set(id, await api("GET", `/transactions/${encodeURIComponent(id)}/journey`));
         } catch (error) {
@@ -1501,6 +1513,7 @@
         }
       }
       if (tracker.stopped) return;
+      recheckFinished = false;
       draw();
       const allDone = [...statuses.values()].every((s) => s && FINISHED.includes(s.status));
       if (allDone) { refreshAlertCount(); return; }
