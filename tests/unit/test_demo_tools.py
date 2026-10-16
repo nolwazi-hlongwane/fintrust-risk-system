@@ -273,5 +273,6 @@ class TestReadyCheck:
 
     def test_it_checks_every_step_the_demonstration_depends_on(self):
         for needed in ("rds_start.sh", "db_tunnel.sh", "transactions-dlq.fifo", "compliance-officer",
-                       "monthly/", "status == 401", "alert_sender", "-operations"):
+                       "monthly/", "status == 401", "alert_sender", "-operations", "CONFIRMED",
+                       "FORCE_CHANGE_PASSWORD"):
             assert needed in self.SOURCE, needed

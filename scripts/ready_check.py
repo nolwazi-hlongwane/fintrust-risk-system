@@ -14,8 +14,9 @@ work? Each line is PASS or FAIL, with what to do about a FAIL.
                  the demo file's own
     * monitoring the CloudWatch dashboard exists; no alarm is firing
     * email      the SES sender address is verified
-    * sign-in    at least one person (not the automation user) can sign in
-                 as a compliance officer, so the Resolve button appears
+    * sign-in    at least one person (not the automation user) is a compliance
+                 officer and has finished the first sign-in, so they can sign
+                 in on the day and the Resolve button appears
     * reports    a monthly report is in the reports bucket, to open live
     * web        the dashboard loads over HTTPS; the API refuses a request
                  with no signed-in person (401)
@@ -160,9 +161,25 @@ def check_sign_in():
     print("\nSign-in")
     pool_id = parameter("cognito_user_pool_id")
     officers = cognito.list_users_in_group(UserPoolId=pool_id, GroupName=OFFICER_GROUP)["Users"]
-    people = [user["Username"] for user in officers if user["Username"] != AUTOMATION_USER and user["Enabled"]]
+    people = [user for user in officers if user["Username"] != AUTOMATION_USER and user["Enabled"]]
     check(f"at least one person is in {OFFICER_GROUP} (sign in as one of them to show Resolve)", bool(people),
-          ", ".join(people) if people else "add one: python scripts/manage_users.py (see its help)")
+          ", ".join(user["Username"] for user in people) if people
+          else "add one: python scripts/manage_users.py create --help")
+
+    # An invited person is FORCE_CHANGE_PASSWORD until their first sign-in, and the temporary
+    # password only lasts 3 days (infrastructure/cognito/password-policy.json). CONFIRMED means
+    # they have chosen their own password, so they can sign in on the day.
+    ready = [user["Username"] for user in people if user["UserStatus"] == "CONFIRMED"]
+    waiting_first = [user["Username"] for user in people if user["UserStatus"] == "FORCE_CHANGE_PASSWORD"]
+    if ready:
+        detail = ", ".join(ready)
+    elif waiting_first:
+        detail = (f"{waiting_first[0]} has not finished the first sign-in. Sign in on the dashboard with the emailed "
+                  "temporary password. If it has expired (3 days), resend it: aws cognito-idp admin-create-user "
+                  f"--user-pool-id {pool_id} --username {waiting_first[0]} --message-action RESEND")
+    else:
+        detail = ", ".join(f"{user['Username']} {user['UserStatus']}" for user in people) or "nobody to check"
+    check("that person has finished the first sign-in (status CONFIRMED)", bool(ready), detail)
 
 
 def check_reports():
