@@ -881,7 +881,7 @@ The dashboard showed confidential bank data to anyone who had the API key. This 
 ## Week 15 Day 4: Presentation Readiness
 
 **Built on:** Thursday 15 October 2026 (brief slot: Week 15, presentation preparation before the Week 16 presentation)
-**Branch:** `presentation-prep`
+**Branch:** `feature/w15d4-presentation-readiness`
 
 A rehearsal of the runbook against the dashboard's code found one step that could not work, and the preparation itself was a list of manual checks. This phase fixes the first and turns the second into one command. No AWS resource, permission or cost is added.
 
@@ -910,4 +910,39 @@ A rehearsal of the runbook against the dashboard's code found one step that coul
 | Brief, Week 16 format: upload a CSV, show the CloudWatch dashboard while transactions ingest, query the API, show the risk report in S3 | Each is a timed step in the runbook |
 | Assessment Rubric C7: end to end without failure | Prepared by `ready_check.py`; the one broken step is fixed |
 | Presentation Rubric C4: demo pre-staged and verified minutes before | `ready_check.py` 15 minutes before; commands pre-typed |
+| Free Tier | Nothing new deployed |
+
+## Week 15 Day 4 (continued): Slides, Sign-in Style and the Demo Story
+
+**Built on:** Friday 16 October 2026 (brief slot: Week 15, presentation preparation)
+**Branch:** `feature/w15d4-presentation-readiness`
+
+The redeploy of Week 15 Day 2 printed an error for the sign-in page's style, the presentation script told a story (Thandi's R68 000) that the demo file did not contain, and the slides did not exist yet. No AWS resource, permission or cost is added.
+
+### Corrections
+
+| Found | Correction |
+|---|---|
+| `deploy_auth.sh` sent the logo to `UpdateManagedLoginBranding` without a style, which Cognito refuses ("useCognitoProvidedValues or settings should be specified"). The sign-in page, the first screen of the demonstration, showed Cognito's default blue | `scripts/brand_signin.py` reads the full style (`ReturnMergedResources`), changes only existing colour and corner values to the dashboard's own, and saves it with the FinTrust logo and tab icon. It never adds a key, so it cannot send a document Cognito does not know. `deploy_auth.sh` runs it; a failure is not fatal |
+| The demo file's HIGH row was R88 750 from ACC-1007 to the UAE; the script tells Thandi's R68 000 story | The HIGH row is R68 000 from ACC-1002, the savings account of the fictional seed customer Thandiwe Mokoena, to a UK company. Still +50 +20 = 70, HIGH. The value lives in one place (`make_demo_file.py`) and the end-to-end test reads it from there |
+| No slides | `docs/presentation/slides.html`: seven slides and a backup, in the dashboard's colours and fonts, using the repository's own diagrams. The architecture slide zooms to steps 1 to 9 as the presenter presses Next, so the diagram can be read from the back of a room. Works offline |
+
+### Key decisions
+
+1. **Restyle from Cognito's own complete document.** The style document has a large schema. Starting from the merged document and only replacing values that are already there means the request is always one Cognito has produced itself.
+2. **Slides as one local page in the repository.** It uses the exact tokens from `frontend/styles.css`, shows the same diagram files the tests check against the schema, and still works if the venue network drops.
+3. **One demo file, uploaded at the end of Section 2.** Nothing is pre-staged; the redrive comes about 9 minutes after the upload, well past the 5-minute FIFO deduplication window.
+
+### Test results
+
+- `pytest tests/unit`: 964 unit tests passing, including 18 new tests for the sign-in style (the colours must equal `styles.css`, no key is ever added, the logo is never sent without the style) and 7 new checks that the demo file, the runbook and the slides tell the same story. `ruff check .` clean; `node --check` passes on `frontend/app.js` and the slides' script.
+- To verify on the deployed system: `python scripts/brand_signin.py`, then open the dashboard and select **Sign in to the risk desk**.
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Presentation Rubric C1: a listener could redraw the architecture | The slide walks the diagram's own numbers, one service at a time, with the plain-English role and the AWS name |
+| Presentation Rubric C2: business value with specific outcomes | Receipt slide (real spend) and the three-outcome slide |
+| Presentation Rubric C4: demo pre-staged | One file, one upload, timed in the runbook |
 | Free Tier | Nothing new deployed |

@@ -10,7 +10,18 @@ The rubric's top mark needs the live system shown end to end without failure. A 
 ```bash
 cd ~/Downloads/Capstone/fintrust-risk-system && source .venv/bin/activate
 ./infrastructure/frontend/deploy_frontend.sh   # the dashboard keeps the upload's progress between sections
+python scripts/brand_signin.py                 # the Cognito sign-in page in the dashboard's colours, with the logo
 ```
+
+The slides are `docs/presentation/slides.html`. Open it from the repository (`open docs/presentation/slides.html`), so the diagrams load from `docs/diagrams/`. It needs no internet connection.
+
+| Key | Does |
+|---|---|
+| → , Space, Page Down, or a clicker | Next. On the architecture slide, Next zooms to steps 1 to 9, then the failure paths, then CloudWatch and IAM. On the receipt slide, Next reveals the total |
+| ← , Page Up | Back |
+| B | Black screen; B again to return (for the personal reflection) |
+| F | Full screen |
+| D | The dead-letter backup slide (pipeline sequence diagram); D again to return |
 
 ## The day before
 
@@ -25,7 +36,9 @@ python scripts/e2e_test.py           # full rehearsal, about 9 minutes; must end
 
 Then rehearse the talk once with a fresh file from `python scripts/make_demo_file.py`, exactly as below, and finish with `./scripts/rds_stop.sh`.
 
-Also check: the alert emails arrive in the inbox and not in spam; you can sign in to the dashboard as `n.hlongwane` (password, then the code from the authenticator app); and what the **Fraud ranking** on the Overview shows now, because your rehearsal uploads change it.
+Also check: the alert emails arrive in the inbox and not in spam; you can sign in to the dashboard as `n.hlongwane` (password, then the code from the authenticator app); the sign-in page is green and brass, not Cognito blue; and what the **Fraud ranking** on the Overview shows now, because your rehearsal uploads change it.
+
+Check the AWS spend (root user → Billing and Cost Management → Credits). The slides and the script say R47 (US$2.88 on 16 October, at R16.43 to the dollar). If it has changed, edit the one line in `docs/presentation/slides.html` that reads `<b>R47</b>`, and the figure you say aloud.
 
 ## One hour before
 
@@ -39,7 +52,7 @@ Also check: the alert emails arrive in the inbox and not in spam; you can sign i
    - `curl -s -w "\nHTTP %{http_code}\n" -H "x-api-key: $API_KEY" "$API_URL/transactions?limit=1"` (run `source ./scripts/api_env.sh` once first, so the variables are set)
 6. Phone charged, authenticator app open on the FinTrust entry, phone hotspot ready in case the venue Wi-Fi fails.
 7. Open these browser tabs, left to right:
-   - the slides
+   - the slides: `open docs/presentation/slides.html`, then F for full screen
    - the dashboard (`aws ssm get-parameter --name /fintrust/dev/dashboard_url --query Parameter.Value --output text`), at the sign-in screen, appearance **Light** for a projector
    - CloudWatch → Dashboards → `fintrust-capstone-operations`, time range 30 minutes, auto-refresh 10 seconds
    - the email inbox
@@ -55,22 +68,23 @@ The nightly automatic stop runs at 20:00 and does not affect a daytime demo.
 
 ## The full presentation (about 16 minutes)
 
-The words are in the presentation script. These are the moments that depend on the system.
+The words are in the presentation script (Week 15 Day 4 version). These are the moments that depend on the system. The file is uploaded once, at the end of Section 2, so the pipeline works while you explain the architecture and the dead-letter row is ready, with the 5-minute window passed, by Section 5.
 
 | Clock | Do | Why then |
 |---|---|---|
-| 3:00 | Dashboard: sign in (password, authenticator code), **Upload a file**, the demo file, **Upload file** | Uploading before the architecture walk-through lets the pipeline work while you talk |
-| 3:30 | Slides: the architecture diagram, then the ERD | |
-| 6:00 | CloudWatch tab | The metrics have had time to arrive |
-| 6:30 | Dashboard → **Upload a file**: open the row marked **Scored, alert sent** | Its score and journey |
-| 7:30 | Inbox: the alert email | |
-| 8:00 | **Transactions**: **Amount** heading twice; **Risk level** High; browser Back and Forward | Sorting and filtering by the database; the filter is in the address |
-| 9:00 | **Overview**: Fraud ranking → ACC-1007 → a red dot; **Show the numbers**; menu → **Dark**, then back | Charts, explainability, appearance |
-| 10:15 | **Alerts** → **Resolve** the new alert | Recorded under your sign-in |
-| 10:45 | Terminal: the `curl` (optional) | 401 before the code runs |
+| 2:30 | Dashboard: **Sign in to the risk desk**, password, authenticator code | The security guard, shown live |
+| 2:50 | **Upload a file**, the demo file, **Upload file**. Back to the slides | "Start the clock": the clerks work while you talk |
+| 3:15 | Slides: architecture. Next walks steps 1 to 9, the failure paths, then CloudWatch and IAM. Then the ERD | |
+| 5:45 | CloudWatch tab | The metrics have had time to arrive |
+| 6:15 | Dashboard → **Upload a file**: open the row marked **Scored, alert sent** | Thandi's R68 000: score 70 and its journey |
+| 7:15 | Inbox: the alert email | |
+| 7:45 | **Transactions**: **Amount** heading twice; **Risk level** High; browser Back and Forward | Sorting and filtering by the database; the filter is in the address |
+| 8:30 | **Overview**: Fraud ranking → an account → a red dot; **Show the numbers**; the appearance button in the top bar (Dark), then again (Light) | Charts, explainability, appearance |
+| 9:45 | **Alerts** → **Resolve** Thandi's alert → **Resolve alert** | "Recorded as" your name, from your sign-in |
+| 10:30 | Terminal: the `curl` (optional) | 401 before the code runs |
 | 11:00 | Dashboard → **Upload a file**: the table is still there; open the row **In the dead-letter queue** | Three attempts, each with its reason |
-| 11:45 | Terminal: onboard, then redrive. Then **Upload a file** again (or reopen the row) | Scored. At least 5 minutes after the upload, as it must be |
-| 12:15 | S3 tabs: the rejected rows, then the latest monthly report | The brief's Week 16 format asks for the report in S3 |
+| 11:30 | Terminal: onboard, then redrive. Then **Upload a file** again (or reopen the row) | Scored. About 9 minutes after the upload, well past the 5-minute window |
+| 12:00 | S3 tabs: the two rejected rows, then the latest monthly report | The brief's Week 16 format asks for the report in S3 |
 
 ## Round 1 only (about 10 minutes)
 
@@ -105,6 +119,7 @@ The words are in the presentation script. These are the moments that depend on t
 | The redriven row does not appear | Redriven inside 5 minutes of the upload | Wait a minute and run `./scripts/redrive_dlq.sh` again |
 | No alert email | Inbox filtering | Show the journey step "Alert emailed to compliance" and the `AlertsSent` metric |
 | AWS CLI says the token expired | Credentials | `aws sts get-caller-identity`, then sign in again |
+| The sign-in page is Cognito blue, not green | The style was not applied | `python scripts/brand_signin.py`, then refresh. Sign-in works either way, so carry on if there is no time |
 | Venue Wi-Fi drops | Network | Switch to the phone hotspot; the system itself is still running in AWS |
 
 Say what you see and what you are checking. A failure diagnosed calmly from the logs and the dashboard scores better than one hidden.

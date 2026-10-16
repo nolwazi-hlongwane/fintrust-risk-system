@@ -77,6 +77,12 @@ class TestDemoFile:
         assert levels.count("HIGH") == 1 and levels.count("MEDIUM") == 1
         assert demo["rows"][4]["transaction_id"] == demo["high_id"]
 
+    def test_the_high_row_is_thandis_r68_000_as_the_presentation_script_tells_it(self, demo):
+        row = demo["rows"][4]
+        assert (row["account_id"], row["amount"]) == ("ACC-1002", "68000.00") and row["country_code"] != "ZA"
+        seed = (ROOT / "sql" / "seed.sql").read_text()
+        assert "('ACC-1002', 'CUST-0001'" in seed and "('CUST-0001', 'Thandiwe Mokoena'" in seed
+
     def test_dead_letter_row_is_valid_but_for_an_account_that_cannot_exist_yet(self, demo):
         row = demo["rows"][7]
         assert row["transaction_id"] == demo["dead_letter_id"] and row["account_id"] == demo["new_account"]
@@ -276,3 +282,34 @@ class TestReadyCheck:
                        "monthly/", "status == 401", "alert_sender", "-operations", "CONFIRMED",
                        "FORCE_CHANGE_PASSWORD"):
             assert needed in self.SOURCE, needed
+
+
+class TestSlides:
+    """docs/presentation/slides.html must show what the system and the demo file actually contain."""
+
+    slides = (ROOT / "docs" / "presentation" / "slides.html").read_text(encoding="utf-8")
+
+    def test_every_diagram_on_a_slide_exists_in_the_repository(self):
+        sources = re.findall(r'src="\.\./diagrams/([a-z-]+\.svg)"', self.slides)
+        assert sorted(sources) == ["architecture.svg", "erd.svg", "pipeline-sequence.svg"]
+        assert all((ROOT / "docs" / "diagrams" / name).is_file() for name in sources)
+
+    def test_the_sms_slide_shows_the_demo_files_high_payment(self):
+        amount = f"R{int(float(make_demo_file.HIGH_AMOUNT)):,}".replace(",", " ") + ".00"
+        assert amount == "R68 000.00" and amount in self.slides
+
+    def test_the_spend_on_the_slide_is_the_one_in_the_runbook(self):
+        total = re.search(r'id="receipt-total"><span>TOTAL SPENT</span><b>(R\d+)</b>', self.slides).group(1)
+        assert f"say {total}" in (ROOT / "docs" / "demo-runbook.md").read_text(encoding="utf-8")
+
+    def test_the_architecture_walk_has_the_diagrams_nine_numbered_steps(self):
+        assert re.findall(r'n: "(\d)"', self.slides) == [str(n) for n in range(1, 10)]
+
+    def test_the_slides_use_the_dashboards_colours(self):
+        css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+        for token in ("ink", "paper", "brass", "story-accent", "muted", "line"):
+            value = re.search(rf"--{token}:\s*(#[0-9a-f]{{6}})", css).group(1)
+            assert f"--{token}: {value};" in self.slides, token
+
+    def test_the_slides_never_build_html_from_text(self):
+        assert "innerHTML" not in self.slides and "<script src=" not in self.slides

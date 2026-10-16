@@ -367,6 +367,8 @@ python scripts/onboard_account.py ACC-9...     # the account id printed by make_
 ./scripts/redrive_dlq.sh
 ```
 
+The presentation slides are [docs/presentation/slides.html](docs/presentation/slides.html): open the file in a browser from the repository (no internet needed). `python scripts/brand_signin.py` gives the sign-in page the dashboard's colours and logo; `deploy_auth.sh` runs it too.
+
 ## Sample data
 
 | File | Contents |

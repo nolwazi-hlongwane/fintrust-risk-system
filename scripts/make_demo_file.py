@@ -10,7 +10,10 @@ The file holds 12 rows that between them show the whole system:
 
     7  ordinary transactions            scored LOW
     1  large local payment              MEDIUM (high amount)
-    1  large cross-border payment       HIGH: alert email
+    1  large cross-border payment       HIGH: alert email. This is "Thandi's"
+                                        payment in the presentation: R68 000 from
+                                        the savings account of Thandiwe Mokoena
+                                        (CUST-0001, a fictional seed customer)
     2  invalid rows                     set aside in the quarantine bucket, never stored
     1  transaction for an account that is not in the ledger yet
                                         fails 3 times, lands in the dead-letter
@@ -27,6 +30,11 @@ from pathlib import Path
 
 SAST = timezone(timedelta(hours=2))
 OUT_DIR = Path(__file__).resolve().parents[1] / "build" / "demo"
+# The presentation's story row: R68 000 leaves Thandiwe Mokoena's savings account
+# for a merchant outside South Africa. +50 (amount over R50 000) +20 (cross-border)
+# = 70, HIGH. scripts/e2e_test.py checks the same values.
+HIGH_ACCOUNT = "ACC-1002"
+HIGH_AMOUNT = "68000.00"
 HEADER = "transaction_id,account_id,tx_date,amount,currency,tx_type,channel,merchant_name,country_code,description"
 
 
@@ -48,7 +56,8 @@ def build(now=None):
         row(2, "ACC-1004", 6, "899.00", "DEBIT", "ONLINE", "Takealot", "ZA", "Online shopping"),
         row(3, "ACC-1006", 11, "640.75", "DEBIT", "POS", "Engen Garage", "ZA", "Fuel"),
         row(4, "ACC-1010", 17, "75000.00", "DEBIT", "EFT", "Sanlam Investments", "ZA", "Investment contribution"),
-        row(5, "ACC-1007", 24, "88750.00", "DEBIT", "EFT", "Dubai Marine Supplies LLC", "AE", "Supplier payment"),
+        row(5, HIGH_ACCOUNT, 24, HIGH_AMOUNT, "DEBIT", "EFT", "Westbridge Property Holdings", "GB",
+            "International transfer"),
         row(6, "ACC-1008", 31, "-250.00", "DEBIT", "ATM", "", "ZA", "Negative amount"),
         row(7, "1009", 38, "120.00", "DEBIT", "POS", "Spar", "ZA", "Account number in the wrong format"),
         row(8, new_account, 44, "1850.00", "DEBIT", "ONLINE", "Mr Price", "ZA", "Account not onboarded yet"),
@@ -69,7 +78,7 @@ def main():
     print(f"Written: {path}\n")
     print("What to expect after uploading it on the dashboard (Upload a file):")
     print("  9 rows scored within about 20 seconds; 2 rows show \"No record yet\" (invalid, quarantined)")
-    print(f"  {high_id}  HIGH, 70 points: alert email arrives")
+    print(f"  {high_id}  HIGH, 70 points: alert email arrives (Thandi's R68 000, account {HIGH_ACCOUNT})")
     print(f"  {dead_letter_id}  Retrying, then \"In the dead-letter queue\" after about 3 minutes")
     print("\nTo recover it (database tunnel open, at least 5 minutes after the upload):")
     print(f"  python scripts/onboard_account.py {new_account}")

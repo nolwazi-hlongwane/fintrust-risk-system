@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FinTrust: Detect. Explain. Survive.</title>
+<link rel="icon" href="../../frontend/favicon.svg" type="image/svg+xml">
+<!--
+  The Week 16 presentation slides (Week 15 Day 4). Open this file in the
+  browser from the repository, so the diagrams load from docs/diagrams/.
+  It needs no internet connection.
+
+    Next          → , Space, Page Down, or a presentation clicker
+    Back          ← , Page Up
+    B             black screen (press again to return)
+    F             full screen
+    D             the dead-letter backup slide (D again to go back)
+    Home          first slide
+
+  The architecture slide walks the numbered steps 1 to 9 as you press Next.
+  Colours and fonts are the dashboard's own (frontend/styles.css).
+-->
+<style>
+:root {
+  --ink: #0f2e2a;
+  --ink-soft: #1d4a43;
+  --paper: #f1f4f2;
+  --surface: #ffffff;
+  --text: #17211f;
+  --muted: #586663;
+  --line: #d3dbd7;
+  --brass: #a6792b;
+  --story-accent: #c99a45;
+  --on-ink: #eef4f1;
+  --on-ink-muted: #a3b4af;
+  --high: #b42318;
+  --high-tint: #fbe6e3;
+  --low: #1b725c;
+  --low-tint: #e3f1ec;
+  --serif: "Iowan Old Style", Charter, "Bitstream Charter", Cambria, Georgia, serif;
+  --sans: "Avenir Next", Avenir, "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+body { font-family: var(--sans); color: var(--text); -webkit-font-smoothing: antialiased; }
+
+/* A 1920 × 1080 stage, scaled to fit any screen (letterboxed). */
+.stage {
+  position: absolute; left: 50%; top: 50%;
+  width: 1920px; height: 1080px;
+  transform-origin: 0 0;
+}
+.slide {
+  position: absolute; inset: 0;
+  opacity: 0; visibility: hidden;
+  transition: opacity .45s ease, visibility 0s linear .45s;
+  overflow: hidden;
+}
+.slide.on { opacity: 1; visibility: visible; transition: opacity .45s ease; }
+.ink { background: var(--ink); color: var(--on-ink); }
+.paper { background: var(--paper); }
+
+.mark { display: inline-flex; align-items: center; gap: 22px; }
+.mark svg { display: block; }
+.mark .word { font-family: var(--serif); font-weight: 600; font-size: 46px; letter-spacing: .3px; }
+.mark .sub { display: block; font-size: 15px; letter-spacing: 2.4px; text-transform: uppercase; color: var(--on-ink-muted); margin-top: 4px; }
+
+.kicker { font-size: 22px; letter-spacing: 3px; text-transform: uppercase; color: var(--story-accent); font-weight: 600; }
+h1, h2 { font-family: var(--serif); font-weight: 600; margin: 0; letter-spacing: -0.5px; }
+
+/* 1. Title */
+.title-slide { padding: 120px 150px; display: flex; flex-direction: column; justify-content: space-between; }
+.title-slide h1 { font-size: 150px; line-height: 1.02; }
+.title-slide h1 span { display: block; }
+.title-slide h1 span:nth-child(2) { color: var(--story-accent); }
+.title-slide .what { font-size: 34px; color: var(--on-ink-muted); margin-top: 34px; max-width: 1300px; line-height: 1.35; }
+.byline { display: flex; justify-content: space-between; align-items: flex-end; font-size: 26px; color: var(--on-ink-muted); }
+.byline strong { color: var(--on-ink); font-weight: 600; display: block; font-size: 32px; margin-bottom: 6px; }
+.rule { height: 4px; width: 120px; background: var(--story-accent); margin-bottom: 40px; }
+
+/* 2. The SMS */
+.sms-slide { display: grid; grid-template-columns: 1fr 1fr; align-items: center; padding: 0 150px; gap: 90px; }
+.phone {
+  justify-self: center; width: 560px; height: 860px; border-radius: 70px; background: #0a1a18;
+  border: 3px solid #2c3c39; padding: 90px 34px; position: relative;
+  box-shadow: 0 40px 90px rgba(0,0,0,.45);
+}
+.phone::before { content: ""; position: absolute; top: 26px; left: 50%; width: 150px; height: 34px; margin-left: -75px; border-radius: 20px; background: #000; }
+.phone .from { text-align: center; color: var(--on-ink-muted); font-size: 22px; margin-bottom: 8px; }
+.phone .when { text-align: center; color: #6f817c; font-size: 18px; margin-bottom: 36px; }
+.bubble {
+  background: #26332f; color: var(--on-ink); border-radius: 28px 28px 28px 8px;
+  padding: 30px 34px; font-size: 36px; line-height: 1.36; max-width: 96%;
+}
+.bubble b { color: #fff; }
+.sms-slide h2 { font-size: 104px; line-height: 1.05; }
+.sms-slide h2 em { font-style: normal; color: var(--story-accent); }
+
+/* Diagram slides */
+.diagram-slide { padding: 54px 60px 0; }
+.diagram-head { display: flex; justify-content: space-between; align-items: baseline; height: 96px; }
+.diagram-head h2 { font-size: 54px; color: var(--ink); }
+.diagram-head .count { font-size: 24px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.frame {
+  position: relative; width: 1800px; height: 840px; overflow: hidden;
+  background: #fff; border: 1px solid var(--line); border-radius: 6px;
+}
+.frame img {
+  position: absolute; left: 0; top: 0; display: block; max-width: none;
+  transition: width .8s cubic-bezier(.3,.7,.2,1), left .8s cubic-bezier(.3,.7,.2,1), top .8s cubic-bezier(.3,.7,.2,1);
+}
+.caption {
+  position: absolute; left: 28px; bottom: 26px; right: 28px;
+  display: flex; align-items: center; gap: 24px;
+  background: rgba(15, 46, 42, .94); color: var(--on-ink);
+  border-radius: 6px; padding: 22px 30px;
+  box-shadow: 0 10px 30px rgba(15, 46, 42, .25);
+  transition: opacity .35s ease;
+}
+.caption[hidden] { display: flex; opacity: 0; }
+.caption .num {
+  flex: none; width: 64px; height: 64px; border-radius: 50%;
+  background: var(--story-accent); color: var(--ink);
+  display: grid; place-items: center; font-weight: 700; font-size: 32px;
+}
+.caption .num.dash { background: transparent; border: 3px dashed #e5483b; color: #ff9a8f; font-size: 26px; }
+.caption .say { font-family: var(--serif); font-size: 38px; font-weight: 600; line-height: 1.15; }
+.caption .aws { font-size: 25px; color: var(--on-ink-muted); margin-top: 6px; }
+
+/* 5. The receipt */
+.receipt-slide { display: grid; grid-template-columns: 760px 1fr; gap: 110px; align-items: center; padding: 0 150px; }
+.receipt-slide h2 { font-size: 92px; line-height: 1.05; color: var(--ink); }
+.receipt-slide .lede { font-size: 32px; color: var(--muted); margin-top: 30px; line-height: 1.4; }
+.receipt {
+  background: var(--surface); border-radius: 4px; padding: 56px 60px 64px;
+  box-shadow: 0 18px 50px rgba(15, 46, 42, .16);
+  font-family: "SF Mono", Menlo, "DejaVu Sans Mono", Consolas, monospace; font-size: 27px; color: var(--text);
+  position: relative;
+}
+.receipt::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -18px; height: 18px;
+  background: linear-gradient(-45deg, transparent 12px, var(--surface) 0) 0 0 / 24px 18px repeat-x,
+              linear-gradient(45deg, transparent 12px, var(--surface) 0) 0 0 / 24px 18px repeat-x;
+}
+.receipt .head { text-align: center; font-family: var(--serif); font-size: 36px; font-weight: 600; color: var(--ink); }
+.receipt .sub { text-align: center; font-size: 19px; color: var(--muted); margin: 8px 0 30px; letter-spacing: 1px; }
+.receipt .line { display: flex; justify-content: space-between; gap: 20px; padding: 13px 0; border-bottom: 2px dotted var(--line); }
+.receipt .line span:last-child { font-weight: 700; white-space: nowrap; }
+.receipt .note { font-size: 19px; color: var(--muted); padding: 0 0 10px; }
+.receipt .total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 26px; padding-top: 22px; border-top: 4px double var(--ink); }
+.receipt .total span:first-child { font-weight: 700; }
+.receipt .total b { font-family: var(--serif); font-size: 64px; color: var(--ink); }
+.receipt .fine { margin-top: 16px; font-size: 19px; color: var(--muted); text-align: right; }
+.receipt .reveal { transition: opacity .5s ease; }
+.receipt .reveal.wait { opacity: 0; }
+
+/* 6. Outcomes */
+.outcomes-slide { padding: 120px 150px; }
+.outcomes-slide h2 { font-size: 80px; color: var(--ink); margin-bottom: 80px; }
+.cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 50px; }
+.col { background: var(--surface); border-radius: 6px; padding: 50px 46px 56px; border-top: 8px solid var(--ink); box-shadow: 0 10px 30px rgba(15,46,42,.08); }
+.col .k { font-size: 22px; letter-spacing: 3px; text-transform: uppercase; color: var(--brass); font-weight: 700; }
+.col .big { font-family: var(--serif); font-size: 50px; font-weight: 600; line-height: 1.12; color: var(--ink); margin: 22px 0 26px; }
+.col p { font-size: 27px; line-height: 1.45; color: var(--muted); margin: 0; }
+
+/* 7. Close */
+.close-slide { display: flex; flex-direction: column; justify-content: center; padding: 0 150px; }
+.close-slide h1 { font-size: 168px; line-height: 1.04; }
+.close-slide h1 span { display: block; }
+.close-slide h1 span:nth-child(2) { color: var(--story-accent); }
+.close-slide .thanks { margin-top: 70px; font-size: 40px; color: var(--on-ink-muted); }
+.close-slide .thanks strong { color: var(--on-ink); font-weight: 600; }
+
+/* Backup */
+.backup-tag { display: inline-block; font-size: 20px; letter-spacing: 2px; text-transform: uppercase; color: var(--brass); font-weight: 700; margin-left: 20px; vertical-align: middle; }
+
+.pageno { position: absolute; right: 44px; bottom: 30px; font-size: 18px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ink .pageno { color: #6f817c; }
+.blackout { position: fixed; inset: 0; background: #000; z-index: 10; display: none; }
+.blackout.on { display: block; }
+.help { position: fixed; left: 16px; bottom: 12px; font: 13px var(--sans); color: #6f817c; z-index: 5; transition: opacity 1s ease 4s; }
+.help.gone { opacity: 0; }
+
+@media print {
+  @page { size: 1920px 1080px; margin: 0; }
+  html, body { background: #fff; overflow: visible; height: auto; }
+  .stage { position: static; transform: none !important; width: 1920px; height: auto; }
+  .slide { position: relative; width: 1920px; height: 1080px; opacity: 1; visibility: visible; page-break-after: always; break-after: page; }
+  .caption { display: none; }
+  .frame img { width: auto !important; height: auto; max-width: 100%; max-height: 100%; left: 50% !important; top: 50% !important; transform: translate(-50%, -50%); transition: none; }
+  .receipt .reveal.wait { opacity: 1; }
+  .help, .blackout { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+
+  <!-- 1 · Title -->
+  <section class="slide ink title-slide" data-name="Title">
+    <div class="mark" aria-label="FinTrust risk desk">
+      <svg width="76" height="76" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="9" fill="#1d4a43"/><path d="M12 37V19h4.5v18zm9 0V25h4.5v12zm9 0v-7.5h4.5V37z" fill="#c99a45"/></svg>
+      <div><span class="word">FinTrust</span><span class="sub">Risk desk</span></div>
+    </div>
+    <div>
+      <div class="rule"></div>
+      <h1><span>Detect. Explain.</span><span>Survive.</span></h1>
+      <p class="what">A transaction insights and risk monitoring system for FinTrust Bank SA, built serverless on AWS.</p>
+    </div>
+    <div class="byline">
+      <div><strong>Nolwazi Hlongwane</strong>Cloud to Solutions Accelerator · Capstone</div>
+      <div>FinTrust Bank SA is a fictional bank. Its problem is real.</div>
+    </div>
+  </section>
+
+  <!-- 2 · The SMS -->
+  <section class="slide ink sms-slide" data-name="The SMS">
+    <div class="phone" aria-hidden="true">
+      <div class="from">FinTrust Bank</div>
+      <div class="when">Text message · after the fact</div>
+      <div class="bubble">FinTrust: <b>Did you make this transaction?</b> R68 000.00 to WESTBRIDGE PROPERTY HOLDINGS (GB). Reply YES or NO.</div>
+    </div>
+    <h2>Did you make <em>this</em> transaction?</h2>
+    <span class="pageno"></span>
+  </section>
+
+  <!-- 3 · Architecture, walked step by step -->
+  <section class="slide paper diagram-slide" data-name="Architecture" data-zoom="arch">
+    <div class="diagram-head"><h2>Walking into the bank branch</h2><span class="count" id="arch-count"></span></div>
+    <div class="frame" id="arch-frame">
+      <img id="arch-img" src="../diagrams/architecture.svg" alt="FinTrust AWS architecture diagram, numbered 1 to 9" data-w="2790" data-h="1170">
+      <div class="caption" id="arch-caption" hidden><div class="num"></div><div><div class="say"></div><div class="aws"></div></div></div>
+    </div>
+    <span class="pageno"></span>
+  </section>
+
+  <!-- 4 · ERD -->
+  <section class="slide paper diagram-slide" data-name="Ledger" data-zoom="erd">
+    <div class="diagram-head"><h2>The ledger: how the records connect</h2><span class="count" id="erd-count"></span></div>
+    <div class="frame" id="erd-frame">
+      <img id="erd-img" src="../diagrams/erd.svg" alt="Entity relationship diagram of the FinTrust ledger" data-w="1653" data-h="1050">
+      <div class="caption" id="erd-caption" hidden><div class="num"></div><div><div class="say"></div><div class="aws"></div></div></div>
+    </div>
+    <span class="pageno"></span>
+  </section>
+
+  <!-- 5 · The receipt -->
+  <section class="slide paper receipt-slide" data-name="The receipt" data-steps="1">
+    <div>
+      <div class="kicker" style="color: var(--brass)">What does it cost?</div>
+      <h2 style="margin-top: 26px">No servers.<br>No idle bill.</h2>
+      <p class="lede">The clerks only clock in when there is work. When nobody uploads a file, the cost is close to zero.</p>
+    </div>
+    <div class="receipt">
+      <div class="head">FinTrust · AWS receipt</div>
+      <div class="sub">WHOLE BUILD · WEEKS 13 TO 15</div>
+      <div class="line"><span>Servers bought or rented</span><span>0</span></div>
+      <div class="line"><span>NAT Gateway, designed away</span><span>R0</span></div>
+      <div class="note">saves more than R500 every month</div>
+      <div class="line"><span>Password vault (IAM sign-in)</span><span>R0</span></div>
+      <div class="line"><span>Database after 20:00</span><span>off</span></div>
+      <div class="total reveal wait" id="receipt-total"><span>TOTAL SPENT</span><b>R47</b></div>
+      <div class="fine reveal wait" id="receipt-fine">US$2.88 from AWS credits · at R16.43 to the dollar</div>
+    </div>
+    <span class="pageno"></span>
+  </section>
+
+  <!-- 6 · Outcomes -->
+  <section class="slide paper outcomes-slide" data-name="Outcomes">
+    <h2>What FinTrust gets</h2>
+    <div class="cols">
+      <div class="col"><div class="k">Risk</div><div class="big">Seconds, not Monday morning.</div><p>The system reacts the moment a file arrives, instead of waiting for someone to open it.</p></div>
+      <div class="col"><div class="k">Compliance</div><div class="big">Every decision explains itself.</div><p>Each score shows the rules that fired, and every resolved alert names the officer who decided.</p></div>
+      <div class="col"><div class="k">Cost</div><div class="big">Pay for use, not for idle time.</div><p>No servers to keep running or patch. Old records move to cheaper storage on their own.</p></div>
+    </div>
+    <span class="pageno"></span>
+  </section>
+
+  <!-- 7 · Close -->
+  <section class="slide ink close-slide" data-name="Close">
+    <div class="rule"></div>
+    <h1><span>Detect. Explain.</span><span>Survive.</span></h1>
+    <p class="thanks"><strong>Thank you.</strong> I'd love to hear your questions.</p>
+    <span class="pageno"></span>
+  </section>
+
+  <!-- Backup (press D) · the DLQ question -->
+  <section class="slide paper diagram-slide" data-name="Backup: dead-letter" data-backup="1" data-zoom="seq">
+    <div class="diagram-head"><h2>When scoring fails: nothing is lost<span class="backup-tag">Backup</span></h2><span class="count">rollback · retry × 3 · dead-letter queue · alarm · redrive</span></div>
+    <div class="frame" id="seq-frame">
+      <img id="seq-img" src="../diagrams/pipeline-sequence.svg" alt="Pipeline sequence diagram with the failure path" data-w="2199" data-h="1321">
+    </div>
+  </section>
+</div>
+
+<div class="blackout" id="blackout"></div>
+<div class="help" id="help">→ next · ← back · B black screen · F full screen · D dead-letter backup</div>
+
+<script>
+(function () {
+  "use strict";
+  // Zoom regions as fractions of each diagram (x0, y0, x1, y1), with what to say.
+  // The architecture numbers are the diagram's own 1 to 9.
+  var ZOOMS = {
+    arch: [
+      null,
+      { r: [0.005, 0.245, 0.195, 0.360], n: "1", say: "The security guard at the door", aws: "Amazon Cognito: password and an authenticator code" },
+      { r: [0.093, 0.148, 0.295, 0.240], n: "2", say: "Branches close to the customer", aws: "Amazon CloudFront: the dashboard, fast and over HTTPS" },
+      { r: [0.087, 0.350, 0.500, 0.448], n: "3", say: "The teller window: the only way in", aws: "Amazon API Gateway: checks the key and the person, every time" },
+      { r: [0.093, 0.430, 0.295, 0.545], n: "4", say: "The secure filing room", aws: "Amazon S3, locked with a key from AWS KMS" },
+      { r: [0.093, 0.468, 0.297, 0.650], n: "5", say: "A clerk who checks every row", aws: "AWS Lambda (ingest): bad rows go to the rejected tray" },
+      { r: [0.200, 0.468, 0.400, 0.650], n: "6", say: "The queue: one line per customer", aws: "Amazon SQS FIFO: in order, exactly once" },
+      { r: [0.405, 0.365, 0.719, 0.545], n: "7", say: "The ledger and the notice board", aws: "Score Lambda → RDS PostgreSQL (ledger) + DynamoDB (scores)" },
+      { r: [0.625, 0.475, 0.822, 0.752], n: "8", say: "A bell rings, and the alert goes out", aws: "DynamoDB Streams → alert Lambda → Amazon SES email" },
+      { r: [0.306, 0.148, 0.600, 0.335], n: "9", say: "The calendar reminder on the 1st", aws: "Amazon EventBridge → report Lambda → the reports room" },
+      { r: [0, 0, 1, 1], n: "", dash: true, say: "Red dashed lines: where failures go", aws: "Three dead-letter queues. Nothing is thrown away." },
+      { r: [0.093, 0.773, 0.694, 0.947], n: "", say: "CCTV, and staff access cards", aws: "Amazon CloudWatch watches everything · AWS IAM: each clerk opens only its own doors" }
+    ],
+    erd: [
+      { r: [0.0125, 0.123, 0.966, 0.748] },
+      { r: [0.0125, 0.123, 0.440, 0.318], n: "", say: "Names and contact details: one locked drawer", aws: "customers is the only table with personal information" }
+    ],
+    seq: [null]
+  };
+
+  var stage = document.getElementById("stage");
+  var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+  var main = slides.filter(function (s) { return !s.dataset.backup; });
+  var backup = slides.filter(function (s) { return s.dataset.backup; })[0];
+  var index = 0, step = 0, returnTo = null;
+
+  function fit() {
+    var scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    stage.style.transform = "scale(" + scale + ") translate(-50%, -50%)";
+  }
+
+  function frameOf(slide) { return slide.querySelector(".frame"); }
+
+  function place(slide, region, animate, captioned) {
+    var frame = frameOf(slide);
+    if (!frame) return;
+    var img = frame.querySelector("img");
+    var fw = frame.clientWidth, fh = frame.clientHeight;
+    var room = captioned ? fh - 150 : fh;           // keep the zoomed part clear of the caption
+    var ratio = Number(img.dataset.h) / Number(img.dataset.w);
+    var base = Math.min(fw, fh / ratio);            // width at which the whole diagram fits
+    var r = region || [0, 0, 1, 1];
+    var rw = (r[2] - r[0]) * base, rh = (r[3] - r[1]) * base * ratio;
+    var s = Math.min(fw / rw, room / rh, 3.4) * (region && (r[2] - r[0]) < 1 ? 0.92 : 1);
+    var w = base * s, h = w * ratio;
+    var cx = (r[0] + r[2]) / 2 * w, cy = (r[1] + r[3]) / 2 * h;
+    img.style.transition = animate ? "" : "none";
+    img.style.width = w + "px";
+    img.style.left = (fw / 2 - cx) + "px";
+    img.style.top = ((region && (r[2] - r[0]) < 1 ? room : fh) / 2 - cy) + "px";
+    if (!animate) { void img.offsetWidth; img.style.transition = ""; }
+  }
+
+  function steps(slide) {
+    if (slide.dataset.zoom) return ZOOMS[slide.dataset.zoom].length;
+    return 1 + Number(slide.dataset.steps || 0);
+  }
+
+  function render(animate) {
+    var current = returnTo !== null ? backup : main[index];
+    slides.forEach(function (s) { s.classList.toggle("on", s === current); });
+    var key = current.dataset.zoom;
+    if (key) {
+      var zoom = ZOOMS[key][step];
+      place(current, zoom && zoom.r, animate, !!(zoom && zoom.say));
+      var caption = current.querySelector(".caption");
+      if (caption) {
+        var has = zoom && zoom.say;
+        caption.hidden = !has;
+        if (has) {
+          var num = caption.querySelector(".num");
+          num.textContent = zoom.n || (zoom.dash ? "- -" : "");
+          num.classList.toggle("dash", !!zoom.dash);
+          num.style.display = zoom.n || zoom.dash ? "" : "none";
+          caption.querySelector(".say").textContent = zoom.say;
+          caption.querySelector(".aws").textContent = zoom.aws;
+        }
+      }
+      var count = document.getElementById(key + "-count");
+      if (count && key === "arch") count.textContent = zoom && zoom.n ? "Step " + zoom.n + " of 9" : "";
+    }
+    var reveals = current.querySelectorAll(".reveal");
+    Array.prototype.forEach.call(reveals, function (el) { el.classList.toggle("wait", step < 1); });
+    var pageno = current.querySelector(".pageno");
+    if (pageno) pageno.textContent = (index + 1) + " / " + main.length;
+  }
+
+  function next() {
+    if (returnTo !== null) return;
+    if (step < steps(main[index]) - 1) { step++; }
+    else if (index < main.length - 1) { index++; step = 0; render(false); return; }
+    render(true);
+  }
+  function back() {
+    if (returnTo !== null) { toggleBackup(); return; }
+    if (step > 0) { step--; render(true); return; }
+    if (index > 0) { index--; step = steps(main[index]) - 1; render(false); }
+  }
+  function toggleBackup() {
+    if (returnTo === null) { returnTo = { index: index, step: step }; render(false); }
+    else { index = returnTo.index; step = returnTo.step; returnTo = null; render(false); }
+  }
+
+  document.addEventListener("keydown", function (event) {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    var k = event.key;
+    if (k === "ArrowRight" || k === " " || k === "PageDown" || k === "Enter" || k === "ArrowDown") { next(); }
+    else if (k === "ArrowLeft" || k === "PageUp" || k === "Backspace" || k === "ArrowUp") { back(); }
+    else if (k === "b" || k === "B" || k === ".") { document.getElementById("blackout").classList.toggle("on"); }
+    else if (k === "f" || k === "F") {
+      if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen();
+    }
+    else if (k === "d" || k === "D") { toggleBackup(); }
+    else if (k === "Home") { index = 0; step = 0; returnTo = null; render(false); }
+    else { return; }
+    event.preventDefault();
+    document.getElementById("help").classList.add("gone");
+  });
+  document.addEventListener("click", function (event) {
+    if (event.button === 0) next();
+  });
+
+  window.addEventListener("resize", function () { fit(); render(false); });
+  window.addEventListener("load", function () { fit(); render(false); });
+  fit(); render(false);
+})();
+</script>
+</body>
+</html>
