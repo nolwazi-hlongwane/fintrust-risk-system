@@ -34,6 +34,8 @@ Transactions loaded as opening data (the three months of seed history) did not p
 
 After a file is accepted, the page reads the transaction ids from the file and asks the API where each one is every four seconds, for up to four minutes. It follows the first 12, to stay well inside the API's limit of 10 requests a second. A row that fails validation never gets a record, and the page says so.
 
+The table belongs to the session, not to the screen (Week 15 Day 4). Moving to Alerts or Transactions and coming back to **Upload a file** shows the last upload again, and every row is checked once more, so a transaction that has since been recovered from the dead-letter queue shows as scored. A row that went to the dead-letter queue is not in the ledger, so this table is the place to open its journey. The table is kept in memory only and forgotten at sign-out.
+
 ## Sign-in and roles (Week 15 Day 2)
 
 The data is confidential: customer transactions, risk scores and fraud alerts. So the dashboard asks **who** is using it, not only which application. Sign-in uses **Amazon Cognito**, the AWS service for user sign-in.

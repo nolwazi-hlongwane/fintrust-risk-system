@@ -356,6 +356,7 @@ It is also stopped automatically at 20:00 South African time every day. Everythi
 ## Demonstrating the system
 
 ```bash
+python scripts/ready_check.py         # is everything the demonstration needs ready? changes nothing
 python scripts/make_demo_file.py      # writes a fresh 12-row file and prints what to expect
 ```
 
@@ -365,6 +366,8 @@ Upload the file on the dashboard and follow [docs/demo-runbook.md](docs/demo-run
 python scripts/onboard_account.py ACC-9...     # the account id printed by make_demo_file.py
 ./scripts/redrive_dlq.sh
 ```
+
+The presentation slides are [docs/presentation/slides.html](docs/presentation/slides.html): open the file in a browser from the repository (no internet needed). `python scripts/brand_signin.py` gives the sign-in page the dashboard's colours and logo; `deploy_auth.sh` runs it too.
 
 ## Sample data
 

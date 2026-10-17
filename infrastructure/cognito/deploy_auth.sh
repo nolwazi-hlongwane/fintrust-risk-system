@@ -161,25 +161,15 @@ if [[ "$VERSION" != "2" ]]; then
 fi
 SIGN_IN_URL="https://${CURRENT_DOMAIN}.auth.${AWS_REGION}.amazoncognito.com"
 
-# Managed login pages need a branding style for the app client. Cognito's own
-# default style is used, with the FinTrust mark added as the form logo.
+# Managed login pages need a branding style for the app client. Start from
+# Cognito's own default style; scripts/brand_signin.py (run after the settings
+# are saved, below) then gives it the dashboard's colours, logo and tab icon.
 if ! BRANDING_ID="$(aws cognito-idp describe-managed-login-branding-by-client --user-pool-id "$POOL_ID" \
       --client-id "$DASHBOARD_CLIENT_ID" --query ManagedLoginBranding.ManagedLoginBrandingId \
       --output text 2>/dev/null)" || [[ -z "$BRANDING_ID" || "$BRANDING_ID" == "None" ]]; then
-  BRANDING_ID="$(aws cognito-idp create-managed-login-branding --user-pool-id "$POOL_ID" \
-      --client-id "$DASHBOARD_CLIENT_ID" --use-cognito-provided-values \
-      --query ManagedLoginBranding.ManagedLoginBrandingId --output text)"
+  aws cognito-idp create-managed-login-branding --user-pool-id "$POOL_ID" \
+      --client-id "$DASHBOARD_CLIENT_ID" --use-cognito-provided-values >/dev/null
   echo "Created the sign-in page style"
-  LOGO_B64="$(base64 < "$HERE/logo.svg" | tr -d '\n')"
-  printf '[{"Category":"FORM_LOGO","ColorMode":"DYNAMIC","Extension":"SVG","Bytes":"%s"}]' "$LOGO_B64" \
-      > "$WORK/assets.json"
-  if aws cognito-idp update-managed-login-branding --user-pool-id "$POOL_ID" \
-        --managed-login-branding-id "$BRANDING_ID" --assets "file://$WORK/assets.json" >/dev/null; then
-    echo "Added the FinTrust logo to the sign-in page"
-  else
-    echo "The sign-in page works with Cognito's default look. To add the logo by hand: Cognito console >"
-    echo "  User pools > ${USER_POOL_NAME} > Managed login > Edit style > Logo, and choose infrastructure/cognito/logo.svg"
-  fi
 fi
 
 # ---------- 5. settings for the API, the dashboard and the scripts ----------
@@ -189,6 +179,9 @@ put_param cognito_user_pool_arn "$POOL_ARN"
 put_param cognito_domain "$SIGN_IN_URL"
 put_param cognito_client_id "$DASHBOARD_CLIENT_ID"
 put_param cognito_automation_client_id "$AUTOMATION_CLIENT_ID"
+
+# The sign-in page in the dashboard's colours. Not fatal: sign-in works either way.
+python3 "$ROOT/scripts/brand_signin.py" || echo "Run python scripts/brand_signin.py again later to restyle the sign-in page."
 
 # ---------- 6. the automation user (verification scripts and end-to-end test) ----------
 python3 "$ROOT/scripts/manage_users.py" automation
