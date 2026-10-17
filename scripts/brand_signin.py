@@ -23,11 +23,16 @@ look changes; users, passwords and sign-in settings are not touched.
 
 Why deploy_auth.sh failed here before: UpdateManagedLoginBranding needs the
 style (Settings) or UseCognitoProvidedValues alongside new Assets, and the
-call sent the logo alone.
+call sent the logo alone. The first version of this script then sent back
+Cognito's default images (Facebook and Google button icons this user pool
+does not have) and an SVG with role and aria-label attributes; Cognito
+refused both. Now only FinTrust's own, cleaned images are sent, and if
+Cognito still refuses an image the colours are saved without it.
 """
 
 import copy
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -147,18 +152,30 @@ def dark_logo(svg_text):
             .replace(f'fill="{LIGHT["muted"]}"', f'fill="{DARK["muted"]}"'))
 
 
-def brand_assets(existing, logo_svg, favicon_svg):
-    """The style's assets: anything already there except the logo and tab icon, plus FinTrust's."""
-    ours = {"FORM_LOGO", "FAVICON_SVG"}
-    kept = []
-    for asset in existing or []:
-        if asset.get("Category") in ours:
-            continue
-        kept.append({key: value for key, value in asset.items() if value is not None})
-    return kept + [
-        {"Category": "FORM_LOGO", "ColorMode": "LIGHT", "Extension": "SVG", "Bytes": logo_svg.encode()},
-        {"Category": "FORM_LOGO", "ColorMode": "DARK", "Extension": "SVG", "Bytes": dark_logo(logo_svg).encode()},
-        {"Category": "FAVICON_SVG", "ColorMode": "DYNAMIC", "Extension": "SVG", "Bytes": favicon_svg.encode()},
+def cognito_safe_svg(svg_text):
+    """The SVG without the attributes Cognito's image checker refuses.
+
+    Cognito answered "element [svg#role|aria-label] is not allowed" for the
+    logo. Those two attributes are for screen readers on a web page; Cognito
+    adds its own alternative text to the image, so nothing is lost.
+    """
+    return re.sub(r'\s(?:role|aria-[a-z-]+)="[^"]*"', "", svg_text)
+
+
+def brand_assets(logo_svg, favicon_svg):
+    """FinTrust's images for the sign-in page: the logo (light and dark) and the tab icon.
+
+    Only these are sent. Cognito's merged style also lists its default images,
+    including sign-in button icons for Facebook, Google and other providers;
+    sending those back is refused because this user pool has no such sign-in,
+    and any image left out keeps Cognito's default.
+    """
+    logo = cognito_safe_svg(logo_svg)
+    return [
+        {"Category": "FORM_LOGO", "ColorMode": "LIGHT", "Extension": "SVG", "Bytes": logo.encode()},
+        {"Category": "FORM_LOGO", "ColorMode": "DARK", "Extension": "SVG", "Bytes": dark_logo(logo).encode()},
+        {"Category": "FAVICON_SVG", "ColorMode": "DYNAMIC", "Extension": "SVG",
+         "Bytes": cognito_safe_svg(favicon_svg).encode()},
     ]
 
 
@@ -175,18 +192,25 @@ def current_style(cognito, pool_id, client_id):
 
 
 def apply(cognito, pool_id, client_id, logo_svg, favicon_svg):
-    """Restyle the sign-in page. Returns the paths changed."""
+    """Restyle the sign-in page. Returns (paths changed, paths not found, images refused or None).
+
+    If Cognito refuses the images, the colours are saved without them, so the
+    page is never left blue because of a logo.
+    """
     style = current_style(cognito, pool_id, client_id)
     settings, changed, missing = restyle(style.get("Settings"))
     if not changed and not style.get("Settings"):
         raise RuntimeError("Cognito returned an empty style document, so there is nothing safe to change")
-    cognito.update_managed_login_branding(
-        UserPoolId=pool_id,
-        ManagedLoginBrandingId=style["ManagedLoginBrandingId"],
-        Settings=settings,
-        Assets=brand_assets(style.get("Assets"), logo_svg, favicon_svg),
-    )
-    return changed, missing
+    request = {"UserPoolId": pool_id, "ManagedLoginBrandingId": style["ManagedLoginBrandingId"], "Settings": settings}
+    try:
+        cognito.update_managed_login_branding(**request, Assets=brand_assets(logo_svg, favicon_svg))
+        refused = None
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") != "InvalidParameterException":
+            raise
+        refused = error.response["Error"].get("Message", str(error))
+        cognito.update_managed_login_branding(**request)     # the colours alone
+    return changed, missing, refused
 
 
 def main():
@@ -198,14 +222,22 @@ def main():
 
     try:
         pool_id, client_id = setting("cognito_user_pool_id"), setting("cognito_client_id")
-        changed, missing = apply(cognito, pool_id, client_id,
-                                 LOGO.read_text(encoding="utf-8"), FAVICON.read_text(encoding="utf-8"))
+        changed, missing, refused = apply(cognito, pool_id, client_id,
+                                          LOGO.read_text(encoding="utf-8"), FAVICON.read_text(encoding="utf-8"))
     except (ClientError, RuntimeError) as error:
-        print(f"The sign-in page style was not changed: {error}")
+        print("The sign-in page style was not changed. Cognito said:")
+        for part in str(error).replace("},{", "}\n{").splitlines():
+            print(f"  {part}")
         print("The sign-in page still works, with Cognito's default look.")
         return 1
-    print(f"Sign-in page restyled in the dashboard's colours ({len(changed)} values), "
-          "with the FinTrust logo and tab icon.")
+    if refused:
+        print(f"Sign-in page restyled in the dashboard's colours ({len(changed)} values). "
+              "Cognito refused the logo, so it keeps its default image. Cognito said:")
+        for part in refused.replace("},{", "}\n{").splitlines():
+            print(f"  {part}")
+    else:
+        print(f"Sign-in page restyled in the dashboard's colours ({len(changed)} values), "
+              "with the FinTrust logo and tab icon.")
     if missing:
         print(f"  ({len(missing)} optional style values are not used by this version of Cognito and were skipped)")
     print(f"Open {setting('dashboard_url')} and select 'Sign in to the risk desk' to see it.")

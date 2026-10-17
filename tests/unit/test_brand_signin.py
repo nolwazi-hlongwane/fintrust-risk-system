@@ -124,16 +124,23 @@ class TestRestyle:
 
 
 class TestAssets:
-    def test_replaces_the_logo_and_icon_and_keeps_everything_else(self):
-        existing = [
-            {"Category": "FORM_LOGO", "ColorMode": "DYNAMIC", "Extension": "SVG", "Bytes": b"old", "ResourceId": None},
-            {"Category": "PAGE_BACKGROUND", "ColorMode": "LIGHT", "Extension": "PNG", "Bytes": b"bg", "ResourceId": None},
-        ]
-        assets = brand_signin.brand_assets(existing, LOGO, FAVICON)
+    def test_sends_only_fintrusts_logo_and_tab_icon(self):
+        assets = brand_signin.brand_assets(LOGO, FAVICON)
         assert [(a["Category"], a["ColorMode"]) for a in assets] == [
-            ("PAGE_BACKGROUND", "LIGHT"), ("FORM_LOGO", "LIGHT"), ("FORM_LOGO", "DARK"), ("FAVICON_SVG", "DYNAMIC")]
-        assert all("ResourceId" not in asset for asset in assets)        # None values are not sent
-        assert assets[1]["Bytes"] == LOGO.encode() and assets[3]["Bytes"] == FAVICON.encode()
+            ("FORM_LOGO", "LIGHT"), ("FORM_LOGO", "DARK"), ("FAVICON_SVG", "DYNAMIC")]
+        assert all(a["Extension"] == "SVG" and isinstance(a["Bytes"], bytes) for a in assets)
+
+    def test_images_have_no_attribute_cognito_refuses(self):
+        """Cognito: 'element [svg#role|aria-label] is not allowed.' (17 October 2026)."""
+        assert 'role="img"' in LOGO and "aria-label" in LOGO        # the file keeps them for the web
+        for asset in brand_signin.brand_assets(LOGO, FAVICON):
+            svg = asset["Bytes"].decode()
+            assert "role=" not in svg and "aria-" not in svg
+            assert svg.startswith("<svg") and svg.rstrip().endswith("</svg>")
+
+    def test_cleaning_keeps_the_drawing(self):
+        clean = brand_signin.cognito_safe_svg(LOGO)
+        assert clean.count("<text") == 2 and clean.count("<rect") == 1 and 'viewBox="0 0 260 56"' in clean
 
     def test_the_dark_logo_is_readable_on_a_dark_page(self):
         dark = brand_signin.dark_logo(LOGO)
@@ -147,8 +154,21 @@ class TestApply:
         cognito = MagicMock()
         cognito.exceptions.ResourceNotFoundException = type("ResourceNotFoundException", (Exception,), {})
         cognito.describe_managed_login_branding_by_client.return_value = {"ManagedLoginBranding": {
-            "ManagedLoginBrandingId": "brand-1", "Settings": settings, "Assets": []}}
+            "ManagedLoginBrandingId": "brand-1", "Settings": settings, "Assets": [
+                # What ReturnMergedResources lists: Cognito's default images, including
+                # sign-in buttons for providers this user pool does not have.
+                {"Category": "IDP_BUTTON_ICON", "ColorMode": "LIGHT", "Extension": "SVG",
+                 "Bytes": b"<svg/>", "ResourceId": "Facebook"},
+                {"Category": "PAGE_BACKGROUND", "ColorMode": "LIGHT", "Extension": "SVG", "Bytes": b"<svg/>"},
+            ]}}
         return cognito
+
+    @staticmethod
+    def refused(code="InvalidParameterException"):
+        from botocore.exceptions import ClientError
+        message = ("[{category: IDP_BUTTON_ICON, extension: SVG, colorMode: LIGHT, resourceId: Google, "
+                   "errorMessage: \"Resource Id 'Google' for asset category 'IDP_BUTTON_ICON' not found\"}]")
+        return ClientError({"Error": {"Code": code, "Message": message}}, "UpdateManagedLoginBranding")
 
     def test_sends_the_style_with_the_logo(self):
         """The Week 15 Day 2 deploy sent the logo alone, and Cognito refused it."""
@@ -160,6 +180,31 @@ class TestApply:
         assert sent["ManagedLoginBrandingId"] == "brand-1"
         assert sent["Settings"]["components"]["primaryButton"]["lightMode"]["defaults"]["backgroundColor"] == "0f2e2aff"
         assert sent["Assets"] and "UseCognitoProvidedValues" not in sent
+
+    def test_never_sends_back_cognitos_default_images(self):
+        """Cognito refused the Facebook and Google button icons it had listed itself (17 October 2026)."""
+        cognito = self.client(cognito_default())
+        brand_signin.apply(cognito, "pool-1", "client-1", LOGO, FAVICON)
+        sent = cognito.update_managed_login_branding.call_args.kwargs["Assets"]
+        assert {asset["Category"] for asset in sent} == {"FORM_LOGO", "FAVICON_SVG"}
+        assert all("ResourceId" not in asset for asset in sent)
+
+    def test_if_the_images_are_refused_the_colours_are_still_saved(self):
+        cognito = self.client(cognito_default())
+        cognito.update_managed_login_branding.side_effect = [self.refused(), {}]
+        changed, _missing, refused = brand_signin.apply(cognito, "pool-1", "client-1", LOGO, FAVICON)
+        first, second = (call.kwargs for call in cognito.update_managed_login_branding.call_args_list)
+        assert "Assets" in first and "Assets" not in second
+        assert second["Settings"] == first["Settings"] and changed
+        assert "IDP_BUTTON_ICON" in refused
+
+    def test_any_other_error_is_reported_and_not_retried(self):
+        from botocore.exceptions import ClientError
+        cognito = self.client(cognito_default())
+        cognito.update_managed_login_branding.side_effect = self.refused("AccessDeniedException")
+        with pytest.raises(ClientError):
+            brand_signin.apply(cognito, "pool-1", "client-1", LOGO, FAVICON)
+        assert cognito.update_managed_login_branding.call_count == 1
 
     def test_creates_cognitos_default_first_when_there_is_no_style(self):
         cognito = self.client(cognito_default())

@@ -946,3 +946,10 @@ The redeploy of Week 15 Day 2 printed an error for the sign-in page's style, the
 | Presentation Rubric C2: business value with specific outcomes | Receipt slide (real spend) and the three-outcome slide |
 | Presentation Rubric C4: demo pre-staged | One file, one upload, timed in the runbook |
 | Free Tier | Nothing new deployed |
+
+### Correction after the first live run (Saturday 17 October 2026)
+
+| Found | Correction |
+|---|---|
+| Cognito refused the first restyle: the script sent back Cognito's own default images, which include sign-in button icons for Facebook, Google and other providers that this user pool does not have, and the logo's `role` and `aria-label` attributes are not allowed in Cognito images | Only FinTrust's logo and tab icon are sent (any image left out keeps Cognito's default), with those attributes removed. If Cognito still refuses an image, the colours are saved without it, so the page is never left blue because of a logo. 5 new tests, including the exact refusal; 969 unit tests passing |
+
