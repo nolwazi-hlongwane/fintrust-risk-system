@@ -30,9 +30,11 @@ cd ~/Downloads/Capstone/fintrust-risk-system && source .venv/bin/activate
 aws sts get-caller-identity          # still signed in as the IAM user, not root
 ./scripts/rds_start.sh               # about 5 minutes
 ./scripts/db_tunnel.sh               # in a second terminal window; leave it open
-python scripts/ready_check.py        # every line PASS
-python scripts/e2e_test.py           # full rehearsal, about 9 minutes; must end in END-TO-END TEST PASSED
+python scripts/ready_check.py        # every line PASS, including GET /health answering 200
+caffeinate -i python scripts/e2e_test.py   # full rehearsal, about 9 minutes; must end in END-TO-END TEST PASSED
 ```
+
+`caffeinate -i` keeps the Mac awake while the test waits. If the Mac sleeps for more than 15 minutes, the automation user's session ends and the test's last API checks fail even though the system worked.
 
 Then rehearse the talk once with a fresh file from `python scripts/make_demo_file.py`, exactly as below, and finish with `./scripts/rds_stop.sh`.
 
@@ -43,7 +45,7 @@ Check the AWS spend (root user → Billing and Cost Management → Credits). The
 ## One hour before
 
 1. `./scripts/rds_start.sh`, then `./scripts/db_tunnel.sh` in a second terminal window.
-2. `python scripts/e2e_test.py --skip-dlq` (2 minutes). It must pass. Then clear the message it leaves behind, using the two commands it prints.
+2. `caffeinate -i python scripts/e2e_test.py --skip-dlq` (2 minutes). It must pass. Then clear the message it leaves behind, using the two commands it prints.
 3. `python scripts/ready_check.py`. Every line must say PASS; each FAIL says what to do.
 4. `python scripts/make_demo_file.py`. Note the file path and the two commands it prints. Copy the file to the Desktop.
 5. In the terminal you will use live, type these three and press Enter on none of them (live you press ↑ and Enter):
