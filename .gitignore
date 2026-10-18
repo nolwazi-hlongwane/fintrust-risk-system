@@ -22,3 +22,7 @@ infrastructure/**/rendered/
 .DS_Store
 .vscode/
 .idea/
+
+# Course marking documents (confidential to Praesignis): kept outside the repository
+*Rubric*.pdf
+*Capstone Brief*.pdf
