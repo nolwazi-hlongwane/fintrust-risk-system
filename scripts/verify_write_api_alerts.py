@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
+from api_auth import headers_for, sign_in
 from botocore.exceptions import ClientError
 
 try:
@@ -67,16 +68,23 @@ def parameter(name):
     return ssm.get_parameter(Name=f"/fintrust/dev/{name}")["Parameter"]["Value"]
 
 
-def api_settings():
+def api_key():
+    """The scripts' own API key (the dashboard has a separate one)."""
     key_id = apigateway.get_api_keys(nameQuery=f"{PREFIX}-compliance-key")["items"][0]["id"]
-    return parameter("api_url"), apigateway.get_api_key(apiKey=key_id, includeValue=True)["value"]
+    return apigateway.get_api_key(apiKey=key_id, includeValue=True)["value"]
+
+
+def api_settings():
+    """The API address, and credentials signed in as the automation user (Week 15 Day 2)."""
+    url = parameter("api_url")
+    return url, sign_in(session, url, api_key())
 
 
 def call(url, method, path, key, params=None, body=None, content_type="application/json"):
     """Call a route. Returns (status, body as dict or None)."""
     full = f"{url}{path}" + (("?" + urllib.parse.urlencode(params)) if params else "")
     data = None
-    headers = {"x-api-key": key} if key else {}
+    headers = headers_for(key)
     if body is not None:
         data = body.encode("utf-8") if isinstance(body, str) else json.dumps(body).encode("utf-8")
         headers["Content-Type"] = content_type
@@ -216,7 +224,8 @@ def verify_flag(url, key):
 def verify_bad_requests(url, key):
     print("\nBad requests")
     status, _body = call(url, "POST", "/flag", None, body={"account_id": FLAG_ACCOUNT, "reason": "No key"})
-    check("a write request with no API key is refused by API Gateway", status == 403, f"HTTP {status}")
+    check("a write request with no API key and no sign-in is refused by API Gateway", status in (401, 403),
+          f"HTTP {status}")
     status, body = call(url, "POST", "/upload", key, body="transaction_id,amount\nTXN-1,5\n", content_type="text/csv")
     check("an upload with the wrong columns is refused with 400 and nothing is stored",
           status == 400 and "missing required column" in body["error"]["message"], f"HTTP {status}")

@@ -23,6 +23,21 @@ from run_sql import connection_settings
 
 ACCOUNT_PATTERN = re.compile(r"^ACC-([0-9]{4,})$")
 
+# Fictional customers, like the seed data: the same account number always gets
+# the same person, so a rehearsal and the live demonstration look identical.
+# Contact details use the reserved example.com domain and the 555 range, so no
+# real person can ever be emailed or called (POPIA).
+FICTIONAL_CUSTOMERS = (
+    ("Naledi", "Mthembu"), ("Ruan", "Pretorius"), ("Fatima", "Essop"), ("Kagiso", "Molefe"),
+    ("Anele", "Ndlovu"), ("Charlene", "Jacobs"), ("Bongani", "Sithole"), ("Priya", "Govender"),
+)
+
+
+def customer_details(number):
+    """Name, email and phone number for the customer behind account ACC-<number>."""
+    first, last = FICTIONAL_CUSTOMERS[int(number) % len(FICTIONAL_CUSTOMERS)]
+    return f"{first} {last}", f"{first}.{last}.{number}@example.com".lower(), f"+27 82 555 {number[-4:]}"
+
 
 def onboard(account_id, connection=None):
     """Insert the customer and account if missing. Returns True if the account was created."""
@@ -44,7 +59,7 @@ def onboard(account_id, connection=None):
                 cursor.execute(
                     "INSERT INTO customers (customer_id, full_name, email, phone_number) "
                     "VALUES (%s, %s, %s, %s) ON CONFLICT (customer_id) DO NOTHING",
-                    (customer_id, f"Demo Customer {number}", f"demo.customer.{number}@example.com", "+27110000000"),
+                    (customer_id, *customer_details(number)),
                 )
                 cursor.execute(
                     "INSERT INTO accounts (account_id, customer_id, account_type, opened_date) "

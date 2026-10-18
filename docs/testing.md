@@ -11,8 +11,8 @@ Every change is checked automatically before it can reach the `develop` or `main
 
 | Layer | What it runs against | When | Tests | What it proves |
 |---|---|---|---|---|
-| **Unit** (`tests/unit`) | moto (a simulated AWS, in memory) | Every push, any branch | 709 | Each module does its own job: validation rules, scoring rules, error handling, email content, API responses, IAM policies |
-| **Integration** (`tests/integration`) | moto and a real PostgreSQL 16 | `develop` branch only | 180 | The modules work together and the SQL is right: constraints, rollback, permissions per database user, and the whole pipeline end to end |
+| **Unit** (`tests/unit`) | moto (a simulated AWS, in memory) | Every push, any branch | 969 | Each module does its own job: validation rules, scoring rules, error handling, email content, API responses, IAM policies |
+| **Integration** (`tests/integration`) | moto and a real PostgreSQL 16 | `develop` branch only | 223 | The modules work together and the SQL is right: constraints, rollback, permissions per database user, and the whole pipeline end to end |
 | **Live verification** (`scripts/verify_*.py`, `scripts/e2e_test.py`) | The real AWS account | By hand, after each deployment | 8 scripts | The deployed system works: real IAM, real network, real email |
 
 Coverage of the application code (`fintrust/`) is 99% with all tests, 96% with unit tests alone.
@@ -50,26 +50,35 @@ A fixture is setup code that pytest runs for any test that asks for it by name.
 | `unit/test_ingest.py` | 44 | File handling, quarantine, queue batches, journey events, retries |
 | `unit/test_score.py` | 21 | Batch handling: partial failures, per-account ordering, redelivery |
 | `unit/test_alert.py` | 24 | Email content, masking, one email per transaction, SES failure |
-| `unit/test_query.py`, `test_query_write.py`, `test_query_cors_accounts.py` | 120 | Every route: validation, status codes, error shape, SQL injection attempts |
+| `unit/test_query.py`, `test_query_write.py`, `test_query_cors_accounts.py` | 121 | Every route: validation, status codes, error shape, SQL injection attempts |
+| `unit/test_query_auth.py` | 40 | Week 15 Day 2: no token is 401; no role is 403; an analyst cannot resolve or flag; sign in, use, sign out and the same token stops working; one person's sign-out does not end another's; a session store failure is 503, not 500; every log line names the actor and no token is ever logged |
+| `unit/test_query_sort_filter.py` | 40 | Every sort order is a fixed `ORDER BY` with a tie-breaker; unknown sorts, bad amounts, countries and dates are 400; LIKE wildcards are escaped |
+| `unit/test_sessions.py` | 21 | Start once, idle and 8-hour limits, sign-out, an ended session can never restart, time-to-live, no token stored |
+| `unit/test_auth_config.py` | 20 | The user pool and app client settings in `deploy_auth.sh`: MFA required, no self sign-up, PKCE code flow only, no client secret, token lifetimes, revocation |
+| `unit/test_auth_scripts.py` | 25 | User management and the automation sign-in: authenticator codes (RFC 6238 test vectors), no password printed, admin-only actions |
 | `unit/test_db.py` | 23 | Connection reuse; rollback on every error path |
 | `unit/test_dynamo.py` | 29 | Keys, journey order, pagination, error wrapping |
 | `unit/test_config.py`, `test_log.py`, `test_models.py`, `test_metrics.py` | 72 | Settings, JSON logs, data classes, metric lines |
 | `unit/test_report.py` | 36 | Which month to report on, CSV and JSON output, failures |
 | `unit/test_failure_paths.py` | 9 | Failures at awkward moments, such as an audit write failing after the real work succeeded |
-| `unit/test_iam_policies.py` | 97 | No wildcard actions; every role limited to its own resources |
-| `unit/test_storage_config.py`, `test_monitoring_config.py` | 45 | Lifecycle rules match the retention policy; alarms and dashboard use real metric names; Free Tier limits |
-| `unit/test_frontend.py` | 23 | The dashboard's files: no key or mock data, no HTML built from data, strict Content-Security-Policy, private hosting |
-| `unit/test_demo_tools.py` | 25 | The demonstration file scores exactly as the end-to-end test expects; onboarding is safe; the diagrams match their source |
+| `unit/test_iam_policies.py` | 98 | No wildcard actions; every role limited to its own resources |
+| `unit/test_storage_config.py`, `test_monitoring_config.py` | 47 | Lifecycle rules match the retention policy; alarms and dashboard use real metric names; Free Tier limits |
+| `unit/test_frontend.py` | 67 | The dashboard's files: no key or mock data, no HTML built from data, strict Content-Security-Policy, private hosting, every file copied and uploaded, the Overview figures layout, sign-in (PKCE, state, tokens in the tab only), light and dark palettes with contrast measured, every offered sort accepted by the API, phone cards. Week 15 Day 4: the last upload's table comes back on return to Upload, is checked again and is forgotten at sign-out |
+| `unit/test_query_trends.py` | 25 | The chart routes: day, week and month bars (Monday weeks, month and year roll-over), validation, the 30-day burst flag, the balance's order, summary and limit |
+| `unit/test_demo_tools.py` | 43 | The demonstration file scores exactly as the end-to-end test expects; onboarding is safe; every diagram is what its generator produces, every picture was exported from its current source, and the ERD drawing has every column and relationship. Week 15 Day 4: the readiness check only reads (no create, update or delete call, no sign-in); the demo file, the runbook and the slides tell the same story |
+| `unit/test_brand_signin.py` | 23 | Week 15 Day 4: the sign-in page's colours equal the dashboard's in both palettes; no key Cognito did not send is ever added; only FinTrust's logo and tab icon are sent, without the attributes Cognito refuses; the logo is never sent without the style; if Cognito refuses the images, the colours are still saved |
 | `unit/test_repo_hygiene.py` | 22 | No keys or passwords committed; dependencies pinned; clients at module level; scripts valid |
 | `integration/test_schema.py` | 46 | Every constraint, index and foreign key rejects bad data |
-| `integration/test_erd_matches_schema.py` | 7 | The ERD document matches the deployed tables exactly |
+| `integration/test_erd_matches_schema.py` | 8 | The ERD document matches the deployed tables exactly |
 | `integration/test_db_integration.py` | 12 | Rollback and reconnect against a real database |
 | `integration/test_score_integration.py` | 18 | Scores, velocity window, atomic writes, break and recover |
-| `integration/test_query_integration.py`, `test_write_api_integration.py` | 54 | API SQL against seed data; `flag_account`; database permissions |
+| `integration/test_query_integration.py`, `test_write_api_integration.py` | 59 | API SQL against seed data; `flag_account`; database permissions |
 | `integration/test_sql_analytics.py` | 24 | Running balance and risk report checked against plain-Python recalculation; window boundaries; views; permissions |
 | `integration/test_report_integration.py` | 9 | The report Lambda end to end on seed data: totals, balances chaining month to month, no customer details |
 | `integration/test_onboard_integration.py` | 3 | Onboarding an account against a real database |
 | `integration/test_pipeline.py` | 7 | The whole pipeline in one process, including the dead-letter queue |
+| `integration/test_sort_filter_integration.py` | 14 | Week 15 Day 2: sorting and filtering on real data: amount order holds across every page, merchant A to Z ignores case, a `%` matches only a `%`, filters combine, alerts and accounts sort as offered |
+| `integration/test_trends_integration.py` | 23 | The chart data reconciled with `/insights`, with `risk_report.sql` account by account, with `monthly_summary.sql` and the hand-worked balances; a period keeps the balance carried in |
 
 ### The pipeline test and the dead-letter queue
 

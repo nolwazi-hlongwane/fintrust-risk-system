@@ -41,6 +41,7 @@ from decimal import Decimal
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from make_demo_file import HIGH_ACCOUNT, HIGH_AMOUNT
 from make_demo_file import build as build_file
 from verify_write_api_alerts import PREFIX, REGION, account_id, api_settings, call, check, results, session
 
@@ -158,7 +159,7 @@ def stage_scoring(url, key, ids):
           "; ".join(wrong))
     high = found.get(5) or {}
     check("money is stored exactly",
-          high.get("amount") == "88750.00" and Decimal(high.get("amount", "0")) == Decimal("88750"))
+          high.get("amount") == HIGH_AMOUNT and Decimal(high.get("amount", "0")) == Decimal(HIGH_AMOUNT))
     check("the invalid rows never reached the ledger",
           all(ledger_row(url, key, ids[n]) is None for n in INVALID_ROWS))
 
@@ -189,7 +190,7 @@ def stage_alert(url, key, ids):
 
 def stage_api(url, key, ids, alert_id):
     print("\n6. API for the compliance team")
-    filters = {"account_id": "ACC-1007", "risk_level": "HIGH", "limit": "100"}
+    filters = {"account_id": HIGH_ACCOUNT, "risk_level": "HIGH", "limit": "100"}
     status, body = call(url, "GET", "/transactions", key, filters)
     check("GET /transactions finds the new transaction by account and risk level",
           status == 200 and ids[5] in [item["transaction_id"] for item in body["items"]])
@@ -200,7 +201,7 @@ def stage_api(url, key, ids, alert_id):
     check("GET /accounts ranks accounts by risk", status == 200 and len(accounts["items"]) >= 12)
     if alert_id:
         status, resolved = call(url, "POST", "/resolve", key, body={
-            "alert_id": alert_id, "resolved_by": "e2e.test", "resolution_note": "Resolved by the end-to-end test"})
+            "alert_id": alert_id, "resolution_note": "Resolved by the end-to-end test"})
         check("POST /resolve closes the alert", status == 200 and resolved["status"] == "RESOLVED", f"HTTP {status}")
     status, _body = call(url, "GET", "/transactions", None)
     check("a request without the API key is refused", status == 403, f"HTTP {status}")

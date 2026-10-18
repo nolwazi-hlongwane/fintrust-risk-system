@@ -8,7 +8,7 @@ Log lines never contain customer names, contact details or free-text description
 
 ## How to run a saved query
 
-The ten queries below are saved in the account by `infrastructure/monitoring/deploy_monitoring.sh`.
+The twelve queries below are saved in the account by `infrastructure/monitoring/deploy_monitoring.sh`.
 
 1. Open the CloudWatch console and choose **Logs Insights** in the left menu.
 2. On the right, open **Saved and sample queries** and expand the **FinTrust** folder.
@@ -143,6 +143,32 @@ fields @timestamp, level, message, month, transactions, accounts, high_risk_acco
 | filter message in ["report_written", "report_failed", "control_totals_disagree"]
 | sort @timestamp desc
 | limit 50
+```
+
+### 11 Who changed what (resolves, flags, uploads)
+
+Week 15 Day 2. Every change to the record, with the signed-in person who made it. The username comes from the person's Cognito sign-in, never from the request, so this is the audit trail a reviewer or the information officer asks for (POPIA accountability).
+
+Log groups: `/aws/lambda/fintrust-capstone-query`
+
+```
+fields @timestamp, actor, message, alert_id, account, object_key
+| filter message in ["alert_resolved", "account_flagged", "upload_accepted"]
+| sort @timestamp desc
+| limit 100
+```
+
+### 12 Refused requests by person (sign-in, session, role)
+
+Week 15 Day 2. Requests the API refused: 401 is no sign-in or a session that has ended, 403 is a role that does not allow the action (an analyst trying to resolve an alert). A sudden rise for one person is worth a look.
+
+Log groups: `/aws/lambda/fintrust-capstone-query`
+
+```
+fields @timestamp, actor, method, resource, status
+| filter message = "request_completed" and status in [401, 403]
+| stats count(*) as refused by actor, resource, status
+| sort refused desc
 ```
 
 ## More queries for the ingest Lambda

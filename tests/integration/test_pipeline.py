@@ -26,7 +26,7 @@ import pytest
 from boto3.dynamodb.types import TypeSerializer
 
 from fintrust import alert, dynamo, ingest, query, score
-from tests.conftest import QUARANTINE_BUCKET, REGION
+from tests.conftest import QUARANTINE_BUCKET, REGION, signed_in
 
 HEADER = "transaction_id,account_id,tx_date,amount,currency,tx_type,channel,merchant_name,country_code,description"
 LOW = "TXN-TEST-PIPE-0001,ACC-1001,2026-10-03T09:00:00+02:00,250.00,ZAR,DEBIT,POS,Checkers,ZA,Groceries"
@@ -107,7 +107,7 @@ class Pump:
         response = query.handler(
             {"httpMethod": method, "resource": resource, "queryStringParameters": params, "pathParameters": path,
              "body": json.dumps(body) if body is not None else None, "headers": {"Content-Type": "application/json"},
-             "isBase64Encoded": False, "requestContext": {"requestId": "pipeline-test"}},
+             "isBase64Encoded": False, "requestContext": signed_in("pipeline-test")},
             Context(),
         )
         return response["statusCode"], json.loads(response["body"])

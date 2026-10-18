@@ -736,3 +736,227 @@ The brief describes a backend system. A web dashboard was confirmed as a welcome
 | Rubric C6: architecture diagram, ERD, README, Conventional Commits | Met |
 
 **After this phase:** merge `develop` into `main`, share the repository with the facilitator, submit the link. Then presentation preparation for Week 16 with `docs/demo-runbook.md`.
+
+## Week 15 Day 1: Corrections and Dashboard Analytics
+
+**Built on:** Monday 12 October 2026 (brief slot: Week 15 Day 1, presentation preparation between the build weeks and the Week 16 presentation)
+**Branch:** `feature/w15d1-dashboard-analytics`
+
+Nothing required by the brief was missing (see `docs/rubric-audit.md`). This phase corrects what review found, and adds charts to the dashboard as advised, without adding services or scope: every chart is a view of SQL the system already has.
+
+### Corrections
+
+| Found | Correction |
+|---|---|
+| On the Overview, the Total value (for example R 6 038 764,84) ran into the Active accounts figure | Six-column grid; the money figure takes two columns, or a row of its own on smaller screens; the value never wraps and scales with the screen. Guarded by tests in `tests/unit/test_frontend.py` |
+| "Active accounts" counted every account with transactions, including flagged ones | Renamed "Accounts with transactions" |
+| Medium (`#9a5f0c`) and High (`#b42318`) were almost the same colour for a colour-blind reader (OKLab ΔE 3.3, deuteranopia) | New fill colours for charts, worst pair ΔE 8.0; text colours unchanged. Legends and tables as well, so colour is never the only signal |
+
+### What was built
+
+| Item | Where |
+|---|---|
+| `GET /insights/trends`: activity per day/week/month, score distribution, alert flow with median time to resolve, account ranking with `PERCENT_RANK` and the 30-day burst rule | `fintrust/query.py` |
+| `GET /accounts/{account_id}/balance`: the running balance, by running `sql/monthly_summary.sql` itself | `fintrust/query.py`, `fintrust/db.py` (`read_sql_file`, shared with the report Lambda) |
+| Both routes in API Gateway | `infrastructure/apigateway/openapi.json` |
+| The SQL files packaged with the query Lambda as well as the report Lambda | `infrastructure/lambda/deploy_function.sh` |
+| Six charts, linked to each other and to the journey drawer; quick periods; zoom by selecting a bar; a table of the numbers under every chart | `frontend/charts.js` (drawing only), `frontend/app.js` (data), `frontend/styles.css` |
+| Live checks for the chart data, reconciled with `GET /insights` | `scripts/verify_dashboard.py` |
+
+### Key decisions
+
+1. **The database does the counting, the browser only draws.** Every chart value comes from PostgreSQL, so a chart can be checked with the same SQL an analyst would run. It also keeps the system backend-heavy, as the brief intends.
+2. **One source of truth for the analytics.** The balance chart runs `sql/monthly_summary.sql` as it is, the same file the monthly report runs. The ranking uses the same `PERCENT_RANK` and rolling 30-day window as `sql/risk_report.sql`, and a test proves they agree account by account.
+3. **Filter after the window function.** The balance is worked out over the account's whole history, then rows outside the period are dropped; otherwise a period would restart the balance at zero. `EXPLAIN` confirms PostgreSQL still reads only the one account through `idx_transactions_account_id`, because the account filter matches the window's `PARTITION BY`.
+4. **Two new routes, not a bigger `/insights`.** The figures and the charts load in parallel and fail independently: if the chart query fails, the figures still show.
+5. **No chart library.** SVG drawn by my own code, so the Content-Security-Policy still allows only the site's own script, and nothing third-party needs patching.
+6. **No new AWS service and no new IAM permission.** The query Lambda's database user already had `SELECT` on the tables it reads; API Gateway gains two routes on the same Lambda.
+
+### Test results
+
+- `pytest`: 945 tests (742 unit, 203 integration), all passing against PostgreSQL 16. 56 are new: `tests/unit/test_query_trends.py`, `tests/integration/test_trends_integration.py` and new checks in `tests/unit/test_frontend.py`.
+- Coverage of `fintrust/`: 99.86% (unit tests alone 95.93%, CI threshold 90%); `query.py` 100%.
+- `ruff check .` clean; every shell script passes `bash -n`.
+- The dashboard was run in Chromium against the real query Lambda and a seeded PostgreSQL at 1440, 1100 and 390 pixels wide, under the production Content-Security-Policy: no console errors, no figure overflow, no sideways scrolling on a phone.
+
+### Evidence (`docs/evidence/`)
+
+- [ ] `w15d1-overview-figures.png`: the Overview figures on the live dashboard, Total value fitting its box
+- [ ] `w15d1-overview-charts.png`: the full Overview with all six charts
+- [ ] `w15d1-ranking-balance.png`: ACC-1007 selected in the ranking (30-day burst) with its running balance
+- [ ] `w15d1-chart-journey.png`: a point on the balance selected, with the journey drawer open
+- [ ] `w15d1-verify-dashboard.png`: terminal, `python scripts/verify_dashboard.py`, ending with every check passed
+- [ ] `w15d1-api-gateway-routes.png`: API Gateway console, Resources, showing `/insights/trends` and `/accounts/{account_id}/balance`
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Brief, Week 16 live demo: upload → ETL → store → score → dashboard → alert | Strengthened: after an upload, the Activity chart, ranking and alert chart all move |
+| Rubric C2: CTE report, window function, view, function | The window function and `PERCENT_RANK` are now visible on screen, not only in files |
+| Rubric C4: tests | 56 new tests; coverage unchanged at 99% |
+| Rubric C6: API design document | `docs/api-design.md` documents both new routes |
+| Free Tier | No new service. Two more API calls each time the Overview opens |
+
+## Week 15 Day 2: Secure Sign-in, Usability and Diagrams
+
+**Built on:** Monday 12 October (evening) and Tuesday 13 October 2026 (brief slot: Week 15, presentation preparation between the build weeks and the Week 16 presentation)
+**Branch:** `feature/w15-secure-signin-usability` (includes Week 15 Day 1)
+
+The dashboard showed confidential bank data to anyone who had the API key. This phase adds sign-in for people, makes the dashboard easier to use, and redraws every diagram to the standard a reviewer expects. It also closes a gap in the brief: DynamoDB now holds all three things the brief lists, "session tokens, risk scores, and event log".
+
+### Corrections
+
+| Found | Correction |
+|---|---|
+| Anyone with the API key could read every transaction, and an alert's `resolved_by` was typed in, so it could name anyone | Cognito sign-in with MFA on every route except `/health`; `resolved_by` and `flagged_by` come from the sign-in, never from the request |
+| `flag_account` recorded why an account was flagged but not who flagged it | `risk_events.flagged_by`, set by the function; `sql/migrations/w15d2_flagged_by.sql` upgrades a deployed database without losing data |
+| The architecture diagram used plain boxes, left out the gateway endpoints as components, and had lines crossing the report and score Lambdas | Redrawn with the official AWS icons and groups (AWS Cloud, Region, VPC, private subnets), the gateway endpoints as hops, a numbered path with a key, failure paths in red; only two crossings, both drawn as hops |
+| The ERD was not in a standard notation, and drew a risk event's transaction as "exactly one" although `transaction_id` may be empty | UML class notation with «table», «PK», «FK», `[0..1]` and multiplicities that match the columns; the DynamoDB key design drawn beside it |
+| The diagram tests failed on this branch: the ERD source had moved to UML but the generator still read the old notation | One generator for all four diagrams; draw.io itself exports the SVG and PDF; a test checks every picture was exported from its current source |
+| The sign-in sequence diagram had no activation bars and self-calls drawn as loose arrows | Rebuilt as a proper UML sequence diagram, with `loop` and `opt` fragments |
+| The documents still described an API key typed into the dashboard | Architecture, API design, security plan, data governance, POPIA statement, dashboard, README, runbook, testing and the rubric audit brought up to date |
+| On a laptop a long merchant name pushed the risk column off the transactions table; on alerts the Resolve button was cut off | Long text wraps; "Resolved by" is shown only when resolved alerts can be listed; the action column has a heading |
+| On a phone, tables scrolled sideways and hid most columns | Each row becomes a card with every value labelled |
+| Alerts could be sorted by score high to low only | Low to high added, matching the transactions table |
+| `onboard_account.py` named new customers "Demo Customer 9001" | Fictional names from a fixed list, like the seed data, with `example.com` addresses and 555 numbers |
+| The security plan named a person where it meant a role, and the execution plan said a decision would be made "together" | Written as roles ("the administrator") and in the first person |
+| Two commands in the documents had a value to fill in | Both now work as written |
+
+### What was built
+
+| Item | Where |
+|---|---|
+| User pool with MFA required, no self sign-up, strong passwords, two groups as roles, managed login pages, two app clients (dashboard: code flow with PKCE; automation: admin sign-in for scripts) | `infrastructure/cognito/` |
+| Cognito authorizer on every route except `GET /health`; a second API key for the dashboard; CORS for the `Authorization` header and `DELETE` | `infrastructure/apigateway/` |
+| Sessions in DynamoDB: start, check on every request (idle 15 minutes, 8 hours at most), end on sign-out, time-to-live 90 days | `fintrust/sessions.py`, `infrastructure/dynamodb/deploy_table.sh` |
+| Role checks in the API: analysts read and upload, officers also resolve and flag; `POST`, `GET` and `DELETE /session` | `fintrust/query.py` |
+| Sorting done by PostgreSQL from a fixed list of orders, each with a tie-breaker; filters for type, channel, country, amount range, merchant, account search, account type; alert filters for account and dates | `fintrust/query.py`, `infrastructure/apigateway/openapi.json` |
+| Dashboard: sign-in screen, user menu, idle warning, System, Light and Dark appearance, sortable headings, filter chips, the view kept in the address, phone cards | `frontend/` |
+| User management: create, list, set-role, end-sessions, disable; the automation user rebuilt with MFA on every deployment | `scripts/manage_users.py`, `scripts/api_auth.py`, `scripts/totp.py` |
+| A live verifier for sign-in | `scripts/verify_auth.py` |
+| Two saved Logs Insights queries: who changed what; refused requests by person | `infrastructure/monitoring/queries.json` |
+| Four diagrams from one generator, drawn by draw.io | `scripts/build_diagrams.py`, `scripts/export_diagrams.py`, `docs/diagrams/` |
+
+### Key decisions
+
+1. **Cognito, not a login page of my own.** Passwords, MFA, lock-outs and resets are a solved problem; writing them myself would be the riskiest code in the project. The dashboard never sees a password.
+2. **Keep the API key.** The brief asks for API key authentication, and the key still does its job: it names the application and enforces the usage plan. The token adds the person.
+3. **A session record as well as a token.** A token cannot be cancelled. The record in DynamoDB can, so sign-out and the idle time-out take effect at once. The API fails closed: if the session cannot be checked, the request is refused with 503.
+4. **Roles are checked in the API, not only in the page.** Hiding a button is courtesy; the API refuses an analyst's resolve whatever the page does.
+5. **The database sorts.** Sorting the 25 rows on screen would be wrong for the other pages. The `sort` value chooses one of the API's own `ORDER BY` texts, so nothing the caller sends is written into SQL.
+6. **Diagrams are generated, not drawn by hand.** The same description produces the editable file and the picture, so they cannot drift apart, and the ERD is read from the document a test compares with the real database.
+
+### Test results
+
+- `pytest`: 1,154 tests (931 unit, 223 integration), all passing against PostgreSQL 16; one skipped locally (it needs the CI database's password login). 209 more than Week 15 Day 1.
+- Coverage of `fintrust/`: 99% (1,737 statements, 10 not run).
+- `ruff check .` clean; every shell script passes `bash -n`; every `aws` command in `infrastructure/` and `scripts/` (209 of them) was checked against the AWS service definitions for valid operation and parameter names.
+- The dashboard was run in Chromium against the real query Lambda, a seeded PostgreSQL and a stand-in for Cognito's sign-in endpoints, under the production Content-Security-Policy, at 1440, 1280 and 390 pixels wide, in light and dark: no console errors, no table wider than its frame, no sideways scrolling on a phone.
+
+### Evidence (`docs/evidence/`)
+
+- [ ] `w15d2-signin.png`: the dashboard's sign-in screen
+- [ ] `w15d2-cognito-mfa.png`: Cognito's page asking for the authenticator code
+- [ ] `w15d2-user-pool-mfa.png`: Cognito console, the user pool's sign-in settings, MFA required
+- [ ] `w15d2-overview-dark.png`: the Overview in dark appearance, with the user menu open
+- [ ] `w15d2-transactions-sorted.png`: transactions sorted by amount with two filter chips
+- [ ] `w15d2-alert-resolved-by.png`: a resolved alert showing the signed-in username
+- [ ] `w15d2-sessions-table.png`: DynamoDB console, one item in `fintrust-capstone-sessions`
+- [ ] `w15d2-api-authorizer.png`: API Gateway console, a method request showing the Cognito authorizer and API key required
+- [ ] `w15d2-verify-auth.png`: terminal, `python scripts/verify_auth.py`, every check passed
+- [ ] `w15d2-phone.png`: the dashboard on a phone, transactions as cards
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Brief: DynamoDB holds "session tokens, risk scores, and event log" | Now met in full: the sessions table is the first of the three |
+| Brief: API Gateway with API key authentication | Kept on every route, with a signed-in person added |
+| Rubric C1: least privilege | The query role gains three actions on the sessions table only; a test still fails the build on any wildcard action |
+| Rubric C5: POPIA | Staff sign-in data classified, kept 90 days, and every decision attributable to a person (accountability) |
+| Rubric C6: architecture diagram, ERD | Redrawn to industry notation (AWS icons and groups; UML), two sequence diagrams added, all generated and tested |
+| Free Tier | Cognito Essentials: 10,000 monthly users free. DynamoDB 15 of 25 read and 25 of 25 write units. No other new cost |
+
+## Week 15 Day 4: Presentation Readiness
+
+**Built on:** Thursday 15 October 2026 (brief slot: Week 15, presentation preparation before the Week 16 presentation)
+**Branch:** `feature/w15d4-presentation-readiness`
+
+A rehearsal of the runbook against the dashboard's code found one step that could not work, and the preparation itself was a list of manual checks. This phase fixes the first and turns the second into one command. No AWS resource, permission or cost is added.
+
+### Corrections
+
+| Found | Correction |
+|---|---|
+| The runbook goes from **Upload a file** to Alerts, Transactions and the Overview, then back to Upload to open the row in the dead-letter queue. Leaving Upload stopped the progress tracking and coming back showed an empty page, and that transaction cannot be found anywhere else because it is not in the ledger | The last upload's table belongs to the session: it is shown again on return, every row is checked once more (so a recovered row shows as scored), and it is forgotten at sign-out. Kept in memory only |
+| The day's readiness depended on remembering a dozen manual checks | `scripts/ready_check.py`: one read-only run that checks the database, tunnel, the five Lambdas, all four queues, alarms, the CloudWatch dashboard, the SES sender, an officer able to sign in, a monthly report in S3, the dashboard over HTTPS, and a 401 for a request with no signed-in person |
+| The 5-minute FIFO deduplication window made the redrive's timing depend on how fast the talk went | The runbook's full-presentation timing uploads the file before the architecture walk-through, so the redrive comes about 8 minutes later |
+
+### Key decisions
+
+1. **Fix the dashboard rather than change the demo.** The dead-letter row is the heart of the resilience story; it must be reachable on screen, not only with `curl`.
+2. **The readiness check changes nothing.** It is run minutes before presenting, so a unit test parses it and fails the build if any AWS call other than a get, describe or list is added, or if it signs in.
+
+### Test results
+
+- `pytest tests/unit`: 939 unit tests passing (5 new for the upload table, 3 for the readiness check). `ruff check .` clean; `node --check` passes on `frontend/app.js`.
+- To verify on the deployed system: deploy the dashboard, then rehearse the runbook once; step 11:00 (Upload, the dead-letter row) is the one this phase fixes.
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Brief, Week 16 format: upload a CSV, show the CloudWatch dashboard while transactions ingest, query the API, show the risk report in S3 | Each is a timed step in the runbook |
+| Assessment Rubric C7: end to end without failure | Prepared by `ready_check.py`; the one broken step is fixed |
+| Presentation Rubric C4: demo pre-staged and verified minutes before | `ready_check.py` 15 minutes before; commands pre-typed |
+| Free Tier | Nothing new deployed |
+
+## Week 15 Day 4 (continued): Slides, Sign-in Style and the Demo Story
+
+**Built on:** Friday 16 October 2026 (brief slot: Week 15, presentation preparation)
+**Branch:** `feature/w15d4-presentation-readiness`
+
+The redeploy of Week 15 Day 2 printed an error for the sign-in page's style, the presentation script told a story (Thandi's R68 000) that the demo file did not contain, and the slides did not exist yet. No AWS resource, permission or cost is added.
+
+### Corrections
+
+| Found | Correction |
+|---|---|
+| `deploy_auth.sh` sent the logo to `UpdateManagedLoginBranding` without a style, which Cognito refuses ("useCognitoProvidedValues or settings should be specified"). The sign-in page, the first screen of the demonstration, showed Cognito's default blue | `scripts/brand_signin.py` reads the full style (`ReturnMergedResources`), changes only existing colour and corner values to the dashboard's own, and saves it with the FinTrust logo and tab icon. It never adds a key, so it cannot send a document Cognito does not know. `deploy_auth.sh` runs it; a failure is not fatal |
+| The demo file's HIGH row was R88 750 from ACC-1007 to the UAE; the script tells Thandi's R68 000 story | The HIGH row is R68 000 from ACC-1002, the savings account of the fictional seed customer Thandiwe Mokoena, to a UK company. Still +50 +20 = 70, HIGH. The value lives in one place (`make_demo_file.py`) and the end-to-end test reads it from there |
+| No slides | `docs/presentation/slides.html`: seven slides and a backup, in the dashboard's colours and fonts, using the repository's own diagrams. The architecture slide zooms to steps 1 to 9 as the presenter presses Next, so the diagram can be read from the back of a room. Works offline |
+
+### Key decisions
+
+1. **Restyle from Cognito's own complete document.** The style document has a large schema. Starting from the merged document and only replacing values that are already there means the request is always one Cognito has produced itself.
+2. **Slides as one local page in the repository.** It uses the exact tokens from `frontend/styles.css`, shows the same diagram files the tests check against the schema, and still works if the venue network drops.
+3. **One demo file, uploaded at the end of Section 2.** Nothing is pre-staged; the redrive comes about 9 minutes after the upload, well past the 5-minute FIFO deduplication window.
+
+### Test results
+
+- `pytest tests/unit`: 964 unit tests passing, including 18 new tests for the sign-in style (the colours must equal `styles.css`, no key is ever added, the logo is never sent without the style) and 7 new checks that the demo file, the runbook and the slides tell the same story. `ruff check .` clean; `node --check` passes on `frontend/app.js` and the slides' script.
+- To verify on the deployed system: `python scripts/brand_signin.py`, then open the dashboard and select **Sign in to the risk desk**.
+
+### Check against the brief and rubric
+
+| Requirement | Status |
+|---|---|
+| Presentation Rubric C1: a listener could redraw the architecture | The slide walks the diagram's own numbers, one service at a time, with the plain-English role and the AWS name |
+| Presentation Rubric C2: business value with specific outcomes | Receipt slide (real spend) and the three-outcome slide |
+| Presentation Rubric C4: demo pre-staged | One file, one upload, timed in the runbook |
+| Free Tier | Nothing new deployed |
+
+### Correction after the first live run (Saturday 17 October 2026)
+
+| Found | Correction |
+|---|---|
+| Cognito refused the first restyle: the script sent back Cognito's own default images, which include sign-in button icons for Facebook, Google and other providers that this user pool does not have, and the logo's `role` and `aria-label` attributes are not allowed in Cognito images | Only FinTrust's logo and tab icon are sent (any image left out keeps Cognito's default), with those attributes removed. If Cognito still refuses an image, the colours are saved without it, so the page is never left blue because of a logo. 5 new tests, including the exact refusal; 969 unit tests passing |
+
+### Documentation check (Sunday 18 October 2026)
+
+| Found | Correction |
+|---|---|
+| `README.md`, `docs/testing.md` and `docs/rubric-audit.md` still gave the Week 15 Day 2 count of 1,154 tests (931 unit), and the file-by-file table had no row for `test_brand_signin.py` | Whole suite run against PostgreSQL 16: 1,192 tests (969 unit, 223 integration), 99% coverage, one skipped locally (it needs the CI database's password login). The three documents now give that count, and the table has every test file |
+| The presentation rubric PDF was saved inside the repository folder; it is a confidential Praesignis marking document, not a project artefact | Moved out of the folder, and course marking documents added to `.gitignore` so they cannot be committed by accident |
+

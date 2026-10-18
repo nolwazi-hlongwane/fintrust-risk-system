@@ -9,6 +9,7 @@
 -- Design: third normal form (3NF).
 --   customers 1 --- many accounts 1 --- many transactions
 --   transactions 1 --- many risk_events   (one row per rule that fired)
+--   accounts     1 --- many risk_events   (rules, plus manual flags by an officer)
 --   transactions 1 --- zero or one alerts (only HIGH risk transactions)
 -- =============================================================================
 
@@ -106,6 +107,10 @@ CREATE TABLE risk_events (
     points          SMALLINT      NOT NULL DEFAULT 0,
     reason          VARCHAR(500)  NOT NULL,
     created_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    -- The signed-in compliance officer who flagged the account (Week 15 Day 2).
+    -- Empty for rule events, which the scoring Lambda records, and for flags
+    -- recorded before sign-in existed.
+    flagged_by      VARCHAR(60),
 
     CONSTRAINT fk_risk_events_account
         FOREIGN KEY (account_id) REFERENCES accounts (account_id)
@@ -119,7 +124,10 @@ CREATE TABLE risk_events (
     CONSTRAINT ck_risk_events_reason_not_blank CHECK (length(btrim(reason)) > 0),
     -- A rule event must name its transaction; a manual flag must not.
     CONSTRAINT ck_risk_events_transaction_presence
-        CHECK ((event_type = 'MANUAL_FLAG') = (transaction_id IS NULL))
+        CHECK ((event_type = 'MANUAL_FLAG') = (transaction_id IS NULL)),
+    -- Only a manual flag is made by a person, so only a manual flag can name one.
+    CONSTRAINT ck_risk_events_flagged_by
+        CHECK (flagged_by IS NULL OR event_type = 'MANUAL_FLAG')
 );
 
 CREATE INDEX idx_risk_events_account_id     ON risk_events (account_id);

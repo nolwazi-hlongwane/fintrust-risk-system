@@ -1,3 +1,8 @@
-// Written by infrastructure/frontend/deploy_frontend.sh with the real API address.
-// It holds no secret: the API key is typed in by the user and never stored in a file.
-window.FINTRUST_CONFIG = { apiUrl: "" };
+// Written by infrastructure/frontend/deploy_frontend.sh with the real addresses.
+// None of these is a secret: the API key identifies this application for the
+// usage plan, and every route except /health also needs a signed-in person.
+window.FINTRUST_CONFIG = {
+  apiUrl: "",
+  apiKey: "",
+  signIn: { domain: "", clientId: "" }
+};

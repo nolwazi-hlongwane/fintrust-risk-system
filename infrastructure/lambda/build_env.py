@@ -25,9 +25,15 @@ ENVIRONMENT = os.environ.get("FINTRUST_ENV", "dev")
 VPC_FUNCTIONS = ("score", "query", "report")
 # Settings a function has no use for are left out of its environment.
 NOT_NEEDED = {
-    "score": ("alert_",),
-    "query": ("alert_",),
-    "report": ("alert_", "queue_url"),
+    "score": ("alert_", "cognito_", "session"),
+    "query": ("alert_", "cognito_"),          # API Gateway checks the Cognito token; the Lambda needs no pool details
+    "report": ("alert_", "queue_url", "cognito_", "session"),
+}
+# Settings a function cannot start without.
+REQUIRED = {
+    "score": ("FINTRUST_DB_HOST", "FINTRUST_DYNAMO_TABLE"),
+    "query": ("FINTRUST_DB_HOST", "FINTRUST_DYNAMO_TABLE", "FINTRUST_SESSIONS_TABLE"),
+    "report": ("FINTRUST_DB_HOST", "FINTRUST_DYNAMO_TABLE"),
 }
 
 
@@ -45,7 +51,7 @@ def build(function):
         variables["FINTRUST_SSM_ENABLED"] = "false"
         variables["FINTRUST_DB_AUTH_MODE"] = "iam"
         variables["FINTRUST_DB_USER"] = f"fintrust_{function}"     # each function has its own database user
-        missing = [key for key in ("FINTRUST_DB_HOST", "FINTRUST_DYNAMO_TABLE") if key not in variables]
+        missing = [key for key in REQUIRED[function] if key not in variables]
         if missing:
             sys.exit(f"ERROR: SSM is missing settings needed by {function}: {', '.join(missing)}")
     return {"Variables": dict(sorted(variables.items()))}

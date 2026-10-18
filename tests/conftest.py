@@ -72,6 +72,67 @@ def put_parameter(ssm):
 
 
 # ----------------------------------------------------------------------------
+# Signed-in people (Week 15 Day 2)
+#
+# Behind API Gateway, the claims of a verified Cognito ID token arrive in
+# event["requestContext"]["authorizer"]["claims"], as text. These are the
+# claims the tests use for the two roles.
+# ----------------------------------------------------------------------------
+OFFICER_CLAIMS = {
+    "cognito:username": "t.nkosi", "name": "Thabo Nkosi", "cognito:groups": "compliance-officer",
+    "origin_jti": "officer-session-0001", "token_use": "id", "auth_time": "1791000000",
+}
+ANALYST_CLAIMS = {
+    "cognito:username": "l.dube", "name": "Lindiwe Dube", "cognito:groups": "compliance-analyst",
+    "origin_jti": "analyst-session-0001", "token_use": "id", "auth_time": "1791000000",
+}
+
+
+def signed_in(request_id, claims=None):
+    """A requestContext as API Gateway sends it after checking the sign-in."""
+    return {"requestId": request_id, "authorizer": {"claims": dict(OFFICER_CLAIMS if claims is None else claims)}}
+
+
+@pytest.fixture(autouse=True)
+def open_session(request, monkeypatch):
+    """Most API tests are about a route, not about sessions, so the session
+    check is answered "open" for them. Tests marked real_sessions use the real
+    check against a fake DynamoDB table (see tests/unit/test_sessions.py)."""
+    if request.node.get_closest_marker("real_sessions"):
+        yield None
+        return
+    from fintrust import sessions
+
+    def always_open(session_id, username):
+        return {"session_id": session_id, "username": username, "status": sessions.ACTIVE}
+
+    monkeypatch.setattr(sessions, "require_active", always_open)
+    yield always_open
+
+
+SESSIONS_TABLE = "fintrust-capstone-sessions"
+
+
+@pytest.fixture
+def sessions_table(aws, monkeypatch):
+    """A fake sessions table with the same key as the deployed one
+    (see infrastructure/dynamodb/deploy_table.sh)."""
+    from fintrust import sessions
+
+    monkeypatch.setenv("FINTRUST_SSM_ENABLED", "false")
+    monkeypatch.setenv("FINTRUST_SESSIONS_TABLE", SESSIONS_TABLE)
+    sessions.reset()
+    created = boto3.resource("dynamodb", region_name=REGION).create_table(
+        TableName=SESSIONS_TABLE,
+        AttributeDefinitions=[{"AttributeName": "session_id", "AttributeType": "S"}],
+        KeySchema=[{"AttributeName": "session_id", "KeyType": "HASH"}],
+        ProvisionedThroughput={"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
+    )
+    yield created
+    sessions.reset()
+
+
+# ----------------------------------------------------------------------------
 # DynamoDB (moto)
 # ----------------------------------------------------------------------------
 TABLE_NAME = "fintrust-capstone-events"

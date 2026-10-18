@@ -77,6 +77,12 @@ class TestDemoFile:
         assert levels.count("HIGH") == 1 and levels.count("MEDIUM") == 1
         assert demo["rows"][4]["transaction_id"] == demo["high_id"]
 
+    def test_the_high_row_is_thandis_r68_000_as_the_presentation_script_tells_it(self, demo):
+        row = demo["rows"][4]
+        assert (row["account_id"], row["amount"]) == ("ACC-1002", "68000.00") and row["country_code"] != "ZA"
+        seed = (ROOT / "sql" / "seed.sql").read_text()
+        assert "('ACC-1002', 'CUST-0001'" in seed and "('CUST-0001', 'Thandiwe Mokoena'" in seed
+
     def test_dead_letter_row_is_valid_but_for_an_account_that_cannot_exist_yet(self, demo):
         row = demo["rows"][7]
         assert row["transaction_id"] == demo["dead_letter_id"] and row["account_id"] == demo["new_account"]
@@ -135,50 +141,175 @@ class TestOnboardAccount:
         assert cursor.execute.call_count == 1
 
 
+class TestOnboardedCustomerDetails:
+    def test_fictional_details_are_stable_and_can_never_reach_a_real_person(self):
+        name, email, phone = onboard_account.customer_details("9001")
+        assert onboard_account.customer_details("9001") == (name, email, phone)   # same every rehearsal
+        assert email.endswith("@example.com") and " 555 " in phone                # reserved for fiction
+        assert len(name) <= 120 and len(email) <= 254 and len(phone) <= 20        # the column limits
+        assert "demo" not in (name + email).lower()
+
+
 class TestDiagrams:
     DIAGRAMS = ROOT / "docs" / "diagrams"
+    NAMES = ["architecture", "erd", "pipeline-sequence", "sign-in-sequence"]
 
-    def test_committed_diagrams_are_what_the_generator_produces(self):
-        boxes = build_diagrams.architecture_boxes()
-        tables, relationships = build_diagrams.read_erd()
-        assert (self.DIAGRAMS / "architecture.svg").read_text() == build_diagrams.architecture_svg(boxes)
-        assert (self.DIAGRAMS / "architecture.drawio").read_text() == build_diagrams.architecture_drawio(boxes)
-        assert (self.DIAGRAMS / "erd.svg").read_text() == build_diagrams.erd_svg(tables, relationships)
-        assert (self.DIAGRAMS / "erd.drawio").read_text() == build_diagrams.erd_drawio(tables, relationships)
+    @staticmethod
+    def labels(drawio_text):
+        """Every visible label in a .drawio file, as plain text."""
+        from html import unescape
+        values = re.findall(r'value="([^"]*)"', drawio_text)
+        return " ".join(re.sub(r"<[^>]+>", " ", unescape(unescape(value))) for value in values)
 
-    @pytest.mark.parametrize("name", ["architecture.pdf", "erd.pdf"])
-    def test_pdf_exports_exist(self, name):
-        assert (self.DIAGRAMS / name).read_bytes().startswith(b"%PDF")
+    def test_committed_drawio_files_are_what_the_generator_produces(self):
+        assert sorted(build_diagrams.DIAGRAMS) == sorted(f"{name}.drawio" for name in self.NAMES)
+        for name, build in build_diagrams.DIAGRAMS.items():
+            assert (self.DIAGRAMS / name).read_text(encoding="utf-8") == build(), name
 
-    def test_architecture_shows_every_service_the_rubric_names_and_the_security_boundaries(self):
-        picture = (self.DIAGRAMS / "architecture.svg").read_text()
+    @pytest.mark.parametrize("name", NAMES)
+    def test_every_picture_was_exported_from_the_current_drawio_file(self, name):
+        import export_diagrams
+
+        drawio = self.DIAGRAMS / f"{name}.drawio"
+        svg = (self.DIAGRAMS / f"{name}.svg").read_text(encoding="utf-8")
+        assert svg.startswith(export_diagrams.stamp(drawio.name, export_diagrams.source_hash(drawio))), (
+            f"{name}.svg is out of date: run scripts/export_diagrams.py")
+        assert (self.DIAGRAMS / f"{name}.pdf").read_bytes().startswith(b"%PDF")
+
+    def test_no_other_files_in_the_diagrams_folder(self):
+        expected = {f"{name}.{kind}" for name in self.NAMES for kind in ("drawio", "svg", "pdf")}
+        assert {path.name for path in self.DIAGRAMS.iterdir()} == expected
+
+    def test_architecture_shows_every_service_and_the_security_boundaries(self):
+        text = self.labels((self.DIAGRAMS / "architecture.drawio").read_text(encoding="utf-8"))
         for required in ("S3 raw bucket", "ingest Lambda", "SQS FIFO queue", "score Lambda", "RDS PostgreSQL",
-                         "DynamoDB", "API Gateway", "Amazon SES", "alert Lambda", "query Lambda", "report Lambda",
-                         "EventBridge", "dead-letter queue", "CloudWatch", "IAM", "KMS", "VPC:", "No internet gateway",
-                         "no public endpoint", "CloudFront"):
-            assert required in picture, required
-        assert picture.count("Lambda</text>") >= 5
+                         "DynamoDB events", "DynamoDB sessions", "Amazon API Gateway", "Amazon SES", "alert Lambda",
+                         "query Lambda", "report Lambda", "EventBridge rule", "EventBridge Scheduler",
+                         "FIFO dead-letter queue", "ingest dead-letter queue", "alert dead-letter queue",
+                         "Amazon CloudWatch", "AWS X-Ray", "AWS IAM", "AWS KMS", "SSM Parameter Store",
+                         "AWS CloudTrail", "Amazon SNS", "Amazon Cognito", "Amazon CloudFront",
+                         "S3 quarantine bucket", "S3 processed bucket", "S3 reports bucket", "S3 dashboard bucket",
+                         "no internet gateway, no NAT Gateway", "Private subnets", "S3 gateway",
+                         "DynamoDB gateway endpoint", "eu-north-1"):
+            assert required in text, required
 
-    def test_every_arrow_joins_two_boxes_that_exist(self):
-        boxes = build_diagrams.architecture_boxes()
-        for source, target, _label, _waypoints, where in build_diagrams.ARCHITECTURE_ARROWS:
-            assert source in boxes and target in boxes and 0 <= where <= 1
+    def test_every_arrow_joins_two_cells_that_exist(self):
+        cards = build_diagrams.architecture_cards()
+        known = set(cards) | {"s3endpoint", "ddbendpoint"}
+        for _id, source, target, _label, kind, exit_at, entry_at, _points in build_diagrams.ARCHITECTURE_ARROWS:
+            assert source in known and target in known
+            assert kind in build_diagrams.ARROW
+            assert all(0 <= value <= 1 for value in (*exit_at, *entry_at))
 
-    def test_no_two_boxes_overlap(self):
-        placed = list(build_diagrams.architecture_boxes().items())
-        for index, (first, (x1, y1, w1, h1, *_)) in enumerate(placed):
-            for second, (x2, y2, w2, h2, *_) in placed[index + 1:]:
-                apart = x1 + w1 <= x2 or x2 + w2 <= x1 or y1 + h1 <= y2 or y2 + h2 <= y1
+    def test_no_two_cards_overlap_and_every_card_is_on_the_page(self):
+        placed = [(name, x, y) for name, (x, y, *_rest) in build_diagrams.architecture_cards().items()]
+        w, h = build_diagrams.CARD_W, build_diagrams.CARD_H
+        for index, (first, x1, y1) in enumerate(placed):
+            assert x1 >= 0 and y1 >= 0
+            for second, x2, y2 in placed[index + 1:]:
+                apart = x1 + w <= x2 or x2 + w <= x1 or y1 + h <= y2 or y2 + h <= y1
                 assert apart, f"{first} overlaps {second}"
 
-    def test_erd_diagram_has_every_table_column_and_key_from_the_tested_erd(self):
+    def test_vpc_lambdas_are_drawn_inside_the_vpc_and_the_others_outside(self):
+        cards = build_diagrams.architecture_cards()
+        left, top = build_diagrams.VPC_X, build_diagrams.VPC_Y
+        right, bottom = left + build_diagrams.VPC_W, top + build_diagrams.VPC_H
+
+        def inside(name):
+            x, y = cards[name][:2]
+            return left < x and x + build_diagrams.CARD_W < right and top < y and y + build_diagrams.CARD_H < bottom
+
+        for name in ("query", "score", "report", "rds", "tunnel"):
+            assert inside(name), name
+        for name in ("ingest", "alert", "fifo", "raw", "events", "sessions", "apigw", "cognito"):
+            assert not inside(name), name
+
+    def test_every_numbered_step_is_explained_once(self):
+        numbers = [number for number, *_ in build_diagrams.STEPS]
+        assert sorted(numbers) == list(range(1, len(numbers) + 1))
+
+    def test_erd_diagram_has_every_table_column_and_relationship_from_the_tested_erd(self):
         tables, relationships = build_diagrams.read_erd()
-        assert sorted(tables) == ["ACCOUNTS", "ALERTS", "CUSTOMERS", "RISK_EVENTS", "TRANSACTIONS"]
+        assert sorted(tables) == ["accounts", "alerts", "customers", "risk_events", "transactions"]
         assert len(relationships) == 5
-        picture = (self.DIAGRAMS / "erd.svg").read_text()
-        for name, columns in tables.items():
-            assert f">{name.lower()}</text>" in picture
+        text = self.labels((self.DIAGRAMS / "erd.drawio").read_text(encoding="utf-8"))
+        for table, columns in tables.items():
+            assert f"«table» {table}" in " ".join(text.split()), table
             for column in columns:
-                assert f">{column[1]}</text>" in picture, f"{name}.{column[1]}"
-        keys = sum(len(column) > 2 for columns in tables.values() for column in columns)
-        assert picture.count(">PK</text>") + picture.count(">FK</text>") == keys == 10
+                assert build_diagrams.column_text(*column) in text, f"{table}.{column[0]}"
+        keys = sum(1 for columns in tables.values() for column in columns if column[2])
+        assert keys == 10
+        for _parent, one, many, _child, name in relationships:
+            assert name in text and one in text and many in text
+
+    @pytest.mark.parametrize(("name", "required"), [
+        ("pipeline-sequence", ["POST /upload", "202 Accepted", "ObjectCreated", "SendMessage", "COMMIT", "ROLLBACK",
+                               "batchItemFailures", "dead-letter queue", "redrive_dlq.sh", "SendEmail", "alt"]),
+        ("sign-in-sequence", ["/oauth2/authorize", "/oauth2/token", "/oauth2/revoke", "POST /session",
+                              "DELETE /session", "SESSION_ENDED", "PKCE", "authenticator code", "loop", "opt"]),
+    ])
+    def test_sequence_diagrams_show_the_real_calls(self, name, required):
+        text = self.labels((self.DIAGRAMS / f"{name}.drawio").read_text(encoding="utf-8"))
+        for words in required:
+            assert words in text, words
+
+
+class TestReadyCheck:
+    """scripts/ready_check.py is run minutes before presenting, so it must never change anything."""
+
+    SOURCE = (ROOT / "scripts" / "ready_check.py").read_text()
+    CHANGING = ("put_", "create_", "delete_", "start_", "stop_", "send_", "invoke", "update_", "modify_",
+                "receive_", "purge_", "change_", "admin_", "initiate_auth", "respond_to_auth", "sign_in", "set_")
+
+    def called_names(self):
+        tree = ast.parse(self.SOURCE)
+        return {node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+                for node in ast.walk(tree) if isinstance(node, ast.Call)}
+
+    def test_no_call_that_changes_anything(self):
+        offending = {name for name in self.called_names() if name.startswith(self.CHANGING)}
+        assert not offending
+
+    def test_every_aws_call_only_reads(self):
+        clients = {"rds", "ec2", "lambda_client", "sqs", "cloudwatch", "ses", "cognito", "s3", "sts"}
+        aws_calls = {node.func.attr for node in ast.walk(ast.parse(self.SOURCE))
+                     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                     and isinstance(node.func.value, ast.Name) and node.func.value.id in clients}
+        assert aws_calls and all(name.startswith(("get_", "describe_", "list_")) for name in aws_calls)
+
+    def test_it_checks_every_step_the_demonstration_depends_on(self):
+        for needed in ("rds_start.sh", "db_tunnel.sh", "transactions-dlq.fifo", "compliance-officer",
+                       "monthly/", "status == 401", "alert_sender", "-operations", "CONFIRMED",
+                       "FORCE_CHANGE_PASSWORD"):
+            assert needed in self.SOURCE, needed
+
+
+class TestSlides:
+    """docs/presentation/slides.html must show what the system and the demo file actually contain."""
+
+    slides = (ROOT / "docs" / "presentation" / "slides.html").read_text(encoding="utf-8")
+
+    def test_every_diagram_on_a_slide_exists_in_the_repository(self):
+        sources = re.findall(r'src="\.\./diagrams/([a-z-]+\.svg)"', self.slides)
+        assert sorted(sources) == ["architecture.svg", "erd.svg", "pipeline-sequence.svg"]
+        assert all((ROOT / "docs" / "diagrams" / name).is_file() for name in sources)
+
+    def test_the_sms_slide_shows_the_demo_files_high_payment(self):
+        amount = f"R{int(float(make_demo_file.HIGH_AMOUNT)):,}".replace(",", " ") + ".00"
+        assert amount == "R68 000.00" and amount in self.slides
+
+    def test_the_spend_on_the_slide_is_the_one_in_the_runbook(self):
+        total = re.search(r'id="receipt-total"><span>TOTAL SPENT</span><b>(R\d+)</b>', self.slides).group(1)
+        assert f"say {total}" in (ROOT / "docs" / "demo-runbook.md").read_text(encoding="utf-8")
+
+    def test_the_architecture_walk_has_the_diagrams_nine_numbered_steps(self):
+        assert re.findall(r'n: "(\d)"', self.slides) == [str(n) for n in range(1, 10)]
+
+    def test_the_slides_use_the_dashboards_colours(self):
+        css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+        for token in ("ink", "paper", "brass", "story-accent", "muted", "line"):
+            value = re.search(rf"--{token}:\s*(#[0-9a-f]{{6}})", css).group(1)
+            assert f"--{token}: {value};" in self.slides, token
+
+    def test_the_slides_never_build_html_from_text(self):
+        assert "innerHTML" not in self.slides and "<script src=" not in self.slides

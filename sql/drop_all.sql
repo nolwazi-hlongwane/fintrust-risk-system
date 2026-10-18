@@ -4,5 +4,6 @@
 BEGIN;
 DROP VIEW IF EXISTS v_open_alerts, v_risk_dashboard;
 DROP FUNCTION IF EXISTS flag_account(VARCHAR, VARCHAR);
+DROP FUNCTION IF EXISTS flag_account(VARCHAR, VARCHAR, VARCHAR);
 DROP TABLE IF EXISTS alerts, risk_events, transactions, accounts, customers CASCADE;
 COMMIT;

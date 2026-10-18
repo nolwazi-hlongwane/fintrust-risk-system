@@ -76,5 +76,19 @@
       "report"
     ],
     "query": "fields @timestamp, level, message, month, transactions, accounts, high_risk_accounts, json_key, error\n| filter message in [\"report_written\", \"report_failed\", \"control_totals_disagree\"]\n| sort @timestamp desc\n| limit 50"
+  },
+  {
+    "name": "11 Who changed what (resolves, flags, uploads)",
+    "functions": [
+      "query"
+    ],
+    "query": "fields @timestamp, actor, message, alert_id, account, object_key\n| filter message in [\"alert_resolved\", \"account_flagged\", \"upload_accepted\"]\n| sort @timestamp desc\n| limit 100"
+  },
+  {
+    "name": "12 Refused requests by person (sign-in, session, role)",
+    "functions": [
+      "query"
+    ],
+    "query": "fields @timestamp, actor, method, resource, status\n| filter message = \"request_completed\" and status in [401, 403]\n| stats count(*) as refused by actor, resource, status\n| sort refused desc"
   }
 ]

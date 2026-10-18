@@ -2,7 +2,7 @@
 
 **Brief slot:** Week 14 Day 5: End-to-End Integration and Submission
 **Framework:** AWS Well-Architected Framework, all six pillars
-**Scope:** the FinTrust system as deployed in my AWS account, region eu-north-1 (Stockholm)
+**Scope:** the FinTrust system as deployed in my AWS account, region eu-north-1 (Stockholm). **Updated in Week 15 Day 2**, when sign-in for people closed the main security gap this review had found.
 
 This is an honest review, not a sales document. For each pillar it lists what the design does well, where it knowingly falls short and why, and what would change for production. Each "gap" is a decision that was made on purpose under the brief's constraints (Free Tier, no NAT Gateway, two build weeks), not something overlooked.
 
@@ -11,7 +11,7 @@ This is an honest review, not a sales document. For each pillar it lists what th
 | Pillar | Rating | The strongest point | The main gap |
 |---|---|---|---|
 | Operational excellence | Good | Everything is deployed by repeatable scripts and verified by scripts | Scripts, not Infrastructure as Code; deployments are run by hand |
-| Security | Strong | Least privilege at three layers: IAM, network, database | API key identifies an application, not a person |
+| Security | Strong | Least privilege at three layers (IAM, network, database), and since Week 15 Day 2 every person signs in with MFA and has a role | No AWS WAF in front of CloudFront and API Gateway |
 | Reliability | Good | Nothing is lost on failure; proven by a break-and-recover test | The database is single-AZ |
 | Performance efficiency | Good for the load | Purpose-built stores; reused connections | Cold starts in the VPC; offset pagination |
 | Cost optimisation | Strong | Idle cost is close to zero; the one always-on resource is stopped nightly | KMS key and database storage draw a small amount of credit |
@@ -24,8 +24,8 @@ This is an honest review, not a sales document. For each pillar it lists what th
 **What is in place**
 
 - **Repeatable deployment.** Every resource is created by a script in `infrastructure/` that is safe to run again. Nothing was clicked together in the console.
-- **Verification after every change.** Eight scripts check the real account: `verify_storage`, `verify_ingest`, `verify_scoring_api`, `verify_write_api_alerts`, `verify_monitoring`, `verify_report`, `verify_dashboard` and the full `e2e_test`.
-- **Observability.** Structured JSON logs, nine custom metrics, seven alarms that email, one dashboard, ten saved Logs Insights queries and X-Ray tracing (`docs/monitoring.md`).
+- **Verification after every change.** Nine scripts check the real account: `verify_storage`, `verify_ingest`, `verify_scoring_api`, `verify_write_api_alerts`, `verify_monitoring`, `verify_report`, `verify_dashboard`, `verify_auth` and the full `e2e_test`.
+- **Observability.** Structured JSON logs, nine custom metrics, seven alarms that email, one dashboard, twelve saved Logs Insights queries and X-Ray tracing (`docs/monitoring.md`).
 - **Runbook thinking.** Each alarm's description says what to do, and `docs/monitoring.md` has a "what to do" column for each.
 - **Small, reviewed changes.** Feature branches, pull requests into `develop`, CI on every push, Conventional Commits.
 
@@ -43,6 +43,7 @@ This is an honest review, not a sales document. For each pillar it lists what th
 
 **What is in place**
 
+- **People.** Since Week 15 Day 2 each member of staff signs in with their own Amazon Cognito account: password plus an authenticator code, required for everyone. Two roles (officer, analyst) are checked by the API on every route. A session record in DynamoDB ends at sign-out, after 15 idle minutes or 8 hours, or when an administrator ends it, so a copied token stops working at once. Every resolved alert and flagged account names the signed-in officer, taken from the token.
 - **Identity.** One IAM role per Lambda. No wildcard actions (a test fails the build if one appears). `Resource: "*"` only in four named cases where AWS offers nothing narrower. A permission boundary on all five roles caps what any of them could ever be given.
 - **Three layers of least privilege.** IAM decides which role may call what. Security groups allow the VPC Lambdas to reach the database on port 5432 and nothing else. Inside PostgreSQL each Lambda has its own user: the score user can insert but never update or delete; the report user is read-only and cannot read customer details; the API can change an account only through one audited function.
 - **No database password in any Lambda.** IAM database authentication: a 15-minute token signed by the role.
@@ -55,7 +56,7 @@ This is an honest review, not a sales document. For each pillar it lists what th
 
 | Gap | Why it is this way | Production change |
 |---|---|---|
-| API key authentication | Specified by the brief | Amazon Cognito or the bank's identity provider, with a token per user and roles (viewer, officer, supervisor) |
+| Staff accounts live in a Cognito user pool of their own | A capstone has no corporate directory to join | Federate Cognito with the bank's identity provider (SAML or OIDC, for example Microsoft Entra ID), so joiners and leavers are managed in one place |
 | No AWS WAF | Not in the Free Tier | WAF on CloudFront and API Gateway |
 | Data hosted in Stockholm | The region used throughout the course | Cape Town (af-south-1) to keep data in South Africa |
 | No GuardDuty, Security Hub or AWS Config | Cost and scope | Enable all three, organisation-wide |
@@ -155,5 +156,5 @@ Billing evidence is in `docs/evidence/` (see `docs/rubric-audit.md`).
 ## The three improvements I would make first
 
 1. **RDS Multi-AZ with RDS Proxy.** It removes the only single point of failure and the connection limit.
-2. **Per-user authentication with Amazon Cognito, and AWS WAF.** It closes the main security gap for a bank.
+2. **AWS WAF, and federation with the bank's identity provider.** Per-person sign-in with MFA and roles is built (Week 15 Day 2); WAF adds rate-based and managed rules at the edge, and federation puts joiners and leavers under the bank's existing process.
 3. **Infrastructure as Code with an automated, OIDC-based deployment.** It makes every environment reproducible and every change reviewable.

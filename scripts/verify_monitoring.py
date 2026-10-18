@@ -22,6 +22,7 @@ import json
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from botocore.exceptions import ClientError
 from verify_write_api_alerts import PREFIX, REGION, SAMPLE, account_id, api_settings, call, check, results, session
@@ -35,7 +36,8 @@ ALARMS = (
     "scoring-error-rate", "high-risk-count", "transactions-dlq-depth", "ingest-dlq-depth",
     "alert-dlq-depth", "lambda-errors", "api-5xx-errors",
 )
-SAVED_QUERIES = 10
+QUERIES_FILE = Path(__file__).resolve().parents[1] / "infrastructure" / "monitoring" / "queries.json"
+SAVED_QUERIES = len(json.loads(QUERIES_FILE.read_text()))        # every query in the file is saved
 WAIT_SECONDS = 420
 
 cloudwatch = session.client("cloudwatch")

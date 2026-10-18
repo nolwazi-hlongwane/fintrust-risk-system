@@ -126,5 +126,5 @@ To produce a report for any month by hand:
 ```bash
 aws lambda invoke --function-name fintrust-capstone-report --cli-binary-format raw-in-base64-out \
     --payload '{"month": "2026-09"}' /dev/stdout
-aws s3 cp s3://fintrust-capstone-reports-<account id>/monthly/2026-09/fintrust-report-2026-09.csv -
+aws s3 cp "s3://fintrust-capstone-reports-$(aws sts get-caller-identity --query Account --output text)/monthly/2026-09/fintrust-report-2026-09.csv" -
 ```

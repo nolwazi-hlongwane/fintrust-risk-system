@@ -76,7 +76,7 @@ The topic is encrypted with the project's KMS key. CloudWatch is an AWS service,
 
 ## Logs
 
-Every function logs JSON with `timestamp`, `level`, `service`, `message` and identifiers such as `transaction_id` and `request_id`. Ten queries are saved in the account under **FinTrust/**; see [logs-insights-queries.md](logs-insights-queries.md). Log groups keep 30 days of logs.
+Every function logs JSON with `timestamp`, `level`, `service`, `message` and identifiers such as `transaction_id` and `request_id`. Twelve queries are saved in the account under **FinTrust/**, including, since Week 15 Day 2, who resolved, flagged or uploaded what, and refused requests by person (the query Lambda adds the signed-in `actor` to every log line); see [logs-insights-queries.md](logs-insights-queries.md). Log groups keep 30 days of logs.
 
 ## X-Ray tracing
 
