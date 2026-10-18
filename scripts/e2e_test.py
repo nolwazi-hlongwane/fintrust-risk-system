@@ -21,8 +21,9 @@ the public API and follows it through every part of the system:
                    dead-letter queue without holding up other accounts, and is
                    recovered by fixing the cause and redriving the queue
 
-To keep the output as evidence:
-    python scripts/e2e_test.py | tee docs/evidence/w14d5-e2e-output.txt
+To keep the output as evidence (caffeinate keeps the Mac awake: if it sleeps for
+more than 15 minutes, the automation user's session ends and the API checks fail):
+    caffeinate -i python -u scripts/e2e_test.py 2>&1 | tee docs/evidence/w15d4-e2e-output.txt
 
 Each run adds 10 transactions and one demonstration account to the ledger and
 sends one alert email (plus alarm emails when the dead-letter alarm fires and clears).
@@ -39,6 +40,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import boto3
+from api_auth import Credentials
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from make_demo_file import HIGH_ACCOUNT, HIGH_AMOUNT
@@ -203,8 +205,13 @@ def stage_api(url, key, ids, alert_id):
         status, resolved = call(url, "POST", "/resolve", key, body={
             "alert_id": alert_id, "resolution_note": "Resolved by the end-to-end test"})
         check("POST /resolve closes the alert", status == 200 and resolved["status"] == "RESOLVED", f"HTTP {status}")
+    # Since Week 15 Day 2, API Gateway checks the Cognito sign-in before the API key, so a request
+    # with neither is refused as 401. The usage plan's own 403 shows when a signed-in person has no key.
     status, _body = call(url, "GET", "/transactions", None)
-    check("a request without the API key is refused", status == 403, f"HTTP {status}")
+    check("a request with no API key and no sign-in is refused (401)", status == 401, f"HTTP {status}")
+    status, _body = call(url, "GET", "/transactions", Credentials(None, key.id_token))
+    check("a signed-in request without the API key is refused by the usage plan (403)", status == 403,
+          f"HTTP {status}")
 
 
 def stage_report():

@@ -283,6 +283,23 @@ class TestReadyCheck:
                        "FORCE_CHANGE_PASSWORD"):
             assert needed in self.SOURCE, needed
 
+    def test_ready_means_the_api_reaches_the_database(self):
+        # RDS can say "available" while the query Lambda still cannot log in (found 18 October).
+        assert "}/health\"" in self.SOURCE
+        assert "status == 200" in self.SOURCE and "HEALTH_ATTEMPTS" in self.SOURCE
+        assert "Authorization" not in self.SOURCE      # still no sign-in
+
+
+class TestEndToEndAuthentication:
+    """Since Week 15 Day 2 API Gateway checks the sign-in before the API key."""
+
+    def test_each_refusal_expects_the_status_api_gateway_really_gives(self):
+        assert 'call(url, "GET", "/transactions", None)' in E2E_SOURCE
+        assert "no sign-in is refused (401)\", status == 401" in E2E_SOURCE
+        assert "Credentials(None, key.id_token)" in E2E_SOURCE
+        assert "usage plan (403)\", status == 403" in E2E_SOURCE
+        assert 'without the API key is refused", status == 403' not in E2E_SOURCE   # the pre-sign-in check
+
 
 class TestSlides:
     """docs/presentation/slides.html must show what the system and the demo file actually contain."""
