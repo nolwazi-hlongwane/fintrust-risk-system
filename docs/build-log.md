@@ -953,3 +953,10 @@ The redeploy of Week 15 Day 2 printed an error for the sign-in page's style, the
 |---|---|
 | Cognito refused the first restyle: the script sent back Cognito's own default images, which include sign-in button icons for Facebook, Google and other providers that this user pool does not have, and the logo's `role` and `aria-label` attributes are not allowed in Cognito images | Only FinTrust's logo and tab icon are sent (any image left out keeps Cognito's default), with those attributes removed. If Cognito still refuses an image, the colours are saved without it, so the page is never left blue because of a logo. 5 new tests, including the exact refusal; 969 unit tests passing |
 
+### Documentation check (Sunday 18 October 2026)
+
+| Found | Correction |
+|---|---|
+| `README.md`, `docs/testing.md` and `docs/rubric-audit.md` still gave the Week 15 Day 2 count of 1,154 tests (931 unit), and the file-by-file table had no row for `test_brand_signin.py` | Whole suite run against PostgreSQL 16: 1,192 tests (969 unit, 223 integration), 99% coverage, one skipped locally (it needs the CI database's password login). The three documents now give that count, and the table has every test file |
+| The presentation rubric PDF was saved inside the repository folder; it is a confidential Praesignis marking document, not a project artefact | Moved out of the folder, and course marking documents added to `.gitignore` so they cannot be committed by accident |
+
