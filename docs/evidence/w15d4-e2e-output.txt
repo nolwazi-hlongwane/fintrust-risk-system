@@ -1,0 +1,66 @@
+FinTrust end-to-end test, account 963236301955, region eu-north-1
+Started 2026-10-18 11:58:31 UTC
+File: fintrust-demo-1018135841.csv (12 rows)
+
+1. Upload through the API
+  [PASS] POST /upload answers 202 Accepted  (HTTP 202)
+  [PASS] the file is in the raw bucket, unchanged and encrypted with the project key  (uploads/2026-10-18/2e5974e8-fintrust-demo-1018135841.csv)
+
+2. ETL: validate, quarantine, hand over
+  ... waiting for the ingest Lambda (up to 90 seconds)
+  [PASS] the 10 valid rows were written to the processed bucket  (10 rows)
+  [PASS] the 2 invalid rows are in the quarantine bucket, each with its reason  (amount '-250.00' must be a positive number with at; account_id must look like ACC-1234)
+  [PASS] rows in = rows passed on + rows quarantined (nothing lost)
+
+3. Scoring and the ledger (RDS)
+  ... waiting for all 9 scorable transactions to reach the ledger (up to 150 seconds)
+  [PASS] all 9 scorable transactions are in the ledger  (9 of 9)
+  [PASS] every score and risk level is exactly as the rules say (0, 20, 50 and 70 points)
+  [PASS] money is stored exactly
+  [PASS] the invalid rows never reached the ledger
+
+4. Event store (DynamoDB)
+  [PASS] the HIGH transaction's score is explained rule by rule  (HIGH_AMOUNT +50, CROSS_BORDER +20)
+  [PASS] a transaction's journey is recorded step by step  (RECEIVED > VALIDATED > QUEUED > SCORED)
+
+5. Alert (DynamoDB stream, alert Lambda, SES)
+  ... waiting for the alert email (up to 90 seconds)
+  [PASS] the alert email for the HIGH transaction was sent
+  [PASS] an alert was opened in the ledger for it, in the same step as the transaction
+  [PASS] no alert was raised for LOW or MEDIUM transactions
+
+6. API for the compliance team
+  [PASS] GET /transactions finds the new transaction by account and risk level
+  [PASS] GET /insights includes it in the totals
+  [PASS] GET /accounts ranks accounts by risk
+  [PASS] POST /resolve closes the alert  (HTTP 200)
+  [PASS] a request with no API key and no sign-in is refused (401)  (HTTP 401)
+  [PASS] a signed-in request without the API key is refused by the usage plan (403)  (HTTP 403)
+
+7. Monthly report (report Lambda, reports bucket)
+  [PASS] the report Lambda produced the 2026-10 report
+  [PASS] the JSON and CSV reports are in the reports bucket  (monthly/2026-10/fintrust-report-2026-10.json)
+  [PASS] the report's control totals agree and it includes today's transactions  (113 transactions this month)
+
+8. Resilience: fail, dead-letter, recover
+  TXN-20261018-D13584108 is for account ACC-91018135841, which is not in the ledger.
+  ... waiting for 3 failed attempts (the queue retries after 60 seconds each time) (up to 330 seconds)
+  [PASS] scoring was attempted exactly 3 times, each recorded with its reason  (3 attempts)
+  ... waiting for the message to arrive in the dead-letter queue (up to 90 seconds)
+  [PASS] the message is in the dead-letter queue: not lost, not retried forever
+  [PASS] the failed transaction is not in the ledger (the database transaction rolled back)
+  [PASS] other accounts were not held up: their transactions were scored before this one gave up
+  note: the fintrust-capstone-transactions-dlq-depth alarm is currently OK. SQS metrics can lag by several minutes;
+        the alarm email arrives when the metric catches up.
+  Fixing the cause: onboarding account ACC-91018135841 in the ledger.
+  [PASS] the missing account was onboarded
+  ... waiting 116 seconds: SQS FIFO ignores a repeated message id for 5 minutes
+  Redrive started: messages are moving from the dead-letter queue back to the scoring queue.
+  ... waiting for the redriven transaction to be scored (up to 180 seconds)
+  [PASS] after the redrive the transaction is in the ledger with its score  (0 LOW)
+  [PASS] its journey shows the whole story: 3 failures, then scored  (RECEIVED > VALIDATED > QUEUED > SCORE_FAILED > SCORE_FAILED > SCORE_FAILED > SCORED)
+  ... waiting for the queues to drain (up to 60 seconds)
+  [PASS] the dead-letter queue and the scoring queue are empty again
+
+31 of 31 checks passed in 5 min 33 s
+END-TO-END TEST PASSED
