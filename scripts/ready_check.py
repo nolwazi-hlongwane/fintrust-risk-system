@@ -8,7 +8,8 @@ It answers one question: if I start the demonstration now, will every step
 work? Each line is PASS or FAIL, with what to do about a FAIL.
 
     * AWS CLI    signed in as the IAM user, not root
-    * database   RDS available, tunnel instance running, tunnel open locally
+    * database   RDS available, tunnel instance running, tunnel open locally, and
+                 the API reaches it (GET /health answers 200)
     * pipeline   the five Lambdas active; all four queues empty, so the
                  only message the dead-letter queue shows during the talk is
                  the demo file's own
@@ -28,6 +29,7 @@ It changes nothing: every AWS call reads, and it does not sign in.
 import argparse
 import socket
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -45,6 +47,7 @@ DASHBOARD = f"{PREFIX}-operations"
 REPORTS_BUCKET = f"{PREFIX}-reports-{account_id}"
 OFFICER_GROUP = "compliance-officer"
 AUTOMATION_USER = "fintrust-automation"
+HEALTH_ATTEMPTS = 7            # about one minute, 10 seconds apart
 
 rds = session.client("rds")
 ec2 = session.client("ec2")
@@ -109,6 +112,20 @@ def check_database():
         is_open = probe.connect_ex(("127.0.0.1", TUNNEL_PORT)) == 0
     check(f"database tunnel is open on localhost:{TUNNEL_PORT} (needed to onboard the account live)", is_open,
           "" if is_open else "run ./scripts/db_tunnel.sh in a second terminal window and leave it open")
+
+    # "available" is RDS's own status. Just after a start, the Lambdas' IAM logins can still be
+    # refused for a minute or two. GET /health makes the query Lambda connect from inside the VPC,
+    # the same path every dashboard request takes. It needs only the API key, not a sign-in.
+    health_url, headers = f"{parameter('api_url')}/health", {"x-api-key": api_key()}
+    status = http_status(health_url, headers)
+    for _attempt in range(HEALTH_ATTEMPTS - 1):
+        if status == 200:
+            break
+        time.sleep(10)
+        status = http_status(health_url, headers)
+    check("the API reaches the database (GET /health answers 200)", status == 200,
+          "" if status == 200 else f"{status} for a minute: wait 2 minutes and run this again. If it stays, read "
+          "the query Lambda's log: aws logs tail /aws/lambda/fintrust-capstone-query --since 15m")
 
 
 def check_pipeline():

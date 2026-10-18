@@ -960,3 +960,15 @@ The redeploy of Week 15 Day 2 printed an error for the sign-in page's style, the
 | `README.md`, `docs/testing.md` and `docs/rubric-audit.md` still gave the Week 15 Day 2 count of 1,154 tests (931 unit), and the file-by-file table had no row for `test_brand_signin.py` | Whole suite run against PostgreSQL 16: 1,192 tests (969 unit, 223 integration), 99% coverage, one skipped locally (it needs the CI database's password login). The three documents now give that count, and the table has every test file |
 | The presentation rubric PDF was saved inside the repository folder; it is a confidential Praesignis marking document, not a project artefact | Moved out of the folder, and course marking documents added to `.gitignore` so they cannot be committed by accident |
 
+### Correction after the end-to-end rehearsal (Sunday 18 October 2026)
+
+The first full run of `scripts/e2e_test.py` since sign-in was added (Week 15 Day 2) found three things.
+
+| Found | Correction |
+|---|---|
+| `ready_check.py` said READY, then the end-to-end test stopped at once: `GET /health` answered 503. RDS reported "available" while the query Lambda could not yet log in from inside the VPC. The readiness check only read RDS's status, so it could not see this. The `api-5xx-errors` alarm emailed, as designed | `ready_check.py` now calls `GET /health` (API key only, no sign-in), retrying for about a minute, and fails with the next step if it never answers 200. READY now means the whole path the dashboard uses works |
+| `a request without the API key is refused` failed. The check, written in Week 14 Day 5, expected 403. Since Week 15 Day 2, API Gateway checks the Cognito sign-in first, so a request with neither key nor sign-in is refused as 401 before the key is looked at | Two checks: no key and no sign-in is 401; a signed-in request without the key is 403 from the usage plan (as `verify_auth.py` already tests). The request was refused in both versions; only the expected status was out of date |
+| The run took 32 minutes instead of about 9, and the last two checks, the ones that read through the API, got no answer while the queue check passed | The automation user's session ends after 15 minutes without a request, so a Mac that sleeps during a wait loses it. The runbook and the script now run the test under `caffeinate -i`, which keeps the Mac awake |
+
+`pytest tests/unit`: 971 unit tests passing (2 new). `ruff check .` clean.
+
