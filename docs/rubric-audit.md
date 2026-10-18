@@ -47,7 +47,7 @@ Each rubric descriptor at the "Exceeds Expectations" level is broken into its pa
 
 | Exceeds descriptor | Status | Proof |
 |---|---|---|
-| Full pytest suite, unit and integration | Met: 1,192 tests (969 unit, 223 integration), 99% coverage of `fintrust/` (889 at submission; 56 added in Week 15 Day 1, 209 in Week 15 Day 2, 38 in Week 15 Day 4) | `tests/`; `docs/testing.md`; `w14d3-pytest-local.png`, `w14d3-coverage.png` |
+| Full pytest suite, unit and integration | Met: 1,194 tests (971 unit, 223 integration), 99% coverage of `fintrust/` (889 at submission; 56 added in Week 15 Day 1, 209 in Week 15 Day 2, 40 in Week 15 Day 4) | `tests/`; `docs/testing.md`; `w14d3-pytest-local.png`, `w14d3-coverage.png` |
 | moto `@mock_aws` fixtures via `conftest.py` | Met | `tests/conftest.py` |
 | GitHub Actions CI green on every push | Met | `.github/workflows/ci.yml`; `w14d3-ci-feature-branch.png`, `w14d3-ci-develop.png` |
 | Integration tests scoped to the develop branch only | Met, and checked by a test | `.github/workflows/ci.yml` |
