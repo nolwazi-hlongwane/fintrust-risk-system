@@ -104,7 +104,7 @@ docker compose down
 
 Without a database those tests are skipped, not failed.
 
-There are 1,154 tests (931 unit, 223 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
+There are 1,192 tests (969 unit, 223 integration) covering 99% of the application code. GitHub Actions runs the unit tests on every push and the integration tests on the `develop` branch. See [docs/testing.md](docs/testing.md).
 
 ## Deploy to AWS
 

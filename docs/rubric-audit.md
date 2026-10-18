@@ -1,7 +1,7 @@
 # Final Audit Against the Brief and Rubric
 
 **Brief slot:** Week 14 Day 5: End-to-End Integration and Submission (Portfolio Check-In #14)
-**Audited:** 7 October 2026, against the Capstone Project Brief and the Capstone Assessment Rubric. **Re-audited:** Week 15 Day 2, after sign-in, roles and sessions were added and every diagram was redrawn; the changes are marked "Week 15 Day 2" below.
+**Audited:** 7 October 2026, against the Capstone Project Brief and the Capstone Assessment Rubric. **Re-audited:** Week 15 Day 2, after sign-in, roles and sessions were added and every diagram was redrawn; the changes are marked "Week 15 Day 2" below. Test counts re-checked on Sunday 18 October 2026 (Week 15, presentation preparation) by running the whole suite against PostgreSQL 16.
 
 Each rubric descriptor at the "Exceeds Expectations" level is broken into its parts below, with where the proof is. "Status" says what has been done; items that depend on a step still to be run on the real account are marked honestly.
 
@@ -47,7 +47,7 @@ Each rubric descriptor at the "Exceeds Expectations" level is broken into its pa
 
 | Exceeds descriptor | Status | Proof |
 |---|---|---|
-| Full pytest suite, unit and integration | Met: 1,154 tests, 99% coverage of `fintrust/` (889 at submission; 56 added in Week 15 Day 1, 209 in Week 15 Day 2) | `tests/`; `docs/testing.md`; `w14d3-pytest-local.png`, `w14d3-coverage.png` |
+| Full pytest suite, unit and integration | Met: 1,192 tests (969 unit, 223 integration), 99% coverage of `fintrust/` (889 at submission; 56 added in Week 15 Day 1, 209 in Week 15 Day 2, 38 in Week 15 Day 4) | `tests/`; `docs/testing.md`; `w14d3-pytest-local.png`, `w14d3-coverage.png` |
 | moto `@mock_aws` fixtures via `conftest.py` | Met | `tests/conftest.py` |
 | GitHub Actions CI green on every push | Met | `.github/workflows/ci.yml`; `w14d3-ci-feature-branch.png`, `w14d3-ci-develop.png` |
 | Integration tests scoped to the develop branch only | Met, and checked by a test | `.github/workflows/ci.yml` |
@@ -81,7 +81,7 @@ The brief's artefact checklist, item by item:
 | Risk register | `docs/data-governance.md` section 5 |
 | `schema.sql`, `seed.sql`, `risk_report.sql`, `monthly_summary.sql`, `views.sql`, stored function | `sql/` |
 | Complete `fintrust/` package with all 10 modules | `fintrust/` |
-| `tests/` with `conftest.py` and at least 3 test files | `tests/` (40 test files) |
+| `tests/` with `conftest.py` and at least 3 test files | `tests/` (41 test files) |
 | `requirements.txt` with pinned versions | `requirements.txt` |
 | `.github/workflows/ci.yml` | `.github/workflows/ci.yml` |
 | `README.md` a non-technical person can follow | `README.md` |
